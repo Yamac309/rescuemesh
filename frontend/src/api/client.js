@@ -1,8 +1,24 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-const WS_BASE_URL = API_BASE_URL.replace(/^http/, "ws");
+function getApiBaseUrl() {
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL.replace(/\/+$/, "");
+  }
+
+  if (typeof window === "undefined") {
+    return "http://localhost:8000";
+  }
+
+  const protocol = window.location.protocol === "https:" ? "https:" : "http:";
+  const { hostname, port, origin } = window.location;
+
+  if (port && port !== "8000") {
+    return `${protocol}//${hostname}:8000`;
+  }
+
+  return origin;
+}
 
 async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     headers: {
       "Content-Type": "application/json",
       ...(options.headers || {})
@@ -70,5 +86,5 @@ export function getHealth() {
 }
 
 export function createSocket() {
-  return new WebSocket(`${WS_BASE_URL}/ws`);
+  return new WebSocket(`${getApiBaseUrl().replace(/^http/, "ws")}/ws`);
 }

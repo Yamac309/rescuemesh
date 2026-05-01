@@ -7,6 +7,7 @@ import { downloadFile, toCsv } from "../utils/reportUtils";
 export default function Dashboard({ mesh }) {
   const highPriority = mesh.reports.filter((report) => ["High", "Critical"].includes(report.urgency) && report.status !== "Resolved");
   const openReports = mesh.reports.filter((report) => report.status !== "Resolved");
+  const showDevelopmentActions = import.meta.env.DEV;
 
   async function seedDemoData() {
     const demoReports = makeDemoReports(mesh.deviceId);
@@ -44,15 +45,19 @@ export default function Dashboard({ mesh }) {
           <button className="primary" onClick={mesh.syncNow}>
             <RefreshCw size={18} /> Sync Now
           </button>
-          <button className="secondary" onClick={seedDemoData}>
-            <Siren size={18} /> Load Demo Data
-          </button>
-          <button className="secondary danger" onClick={mesh.removeDemoReports}>
-            <Trash2 size={18} /> Remove Demo Data
-          </button>
-          <button className="secondary danger" onClick={clearAllReports} disabled={!mesh.reports.length}>
-            <Trash2 size={18} /> Clear All Reports
-          </button>
+          {showDevelopmentActions && (
+            <>
+              <button className="secondary" onClick={seedDemoData}>
+                <Siren size={18} /> Load Demo Data
+              </button>
+              <button className="secondary danger" onClick={mesh.removeDemoReports}>
+                <Trash2 size={18} /> Remove Demo Data
+              </button>
+              <button className="secondary danger" onClick={clearAllReports} disabled={!mesh.reports.length}>
+                <Trash2 size={18} /> Clear All Reports
+              </button>
+            </>
+          )}
         </div>
       </section>
 

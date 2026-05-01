@@ -215,18 +215,19 @@ export function useReports() {
 
   const clearAllReports = useCallback(async () => {
     const localReportIds = reports.map((report) => report.report_id);
-    await deleteAllLocalReports();
-    setReports([]);
 
     try {
       const response = await deleteAllReports();
-      await removeFromState(response.deleted_report_ids || localReportIds);
+      await deleteAllLocalReports();
+      setReports([]);
       await refreshNodeStatus();
       setSyncStatus(`Cleared ${Math.max(localReportIds.length, response.deleted_count || 0)} reports`);
     } catch {
+      await deleteAllLocalReports();
+      setReports([]);
       setSyncStatus(`Cleared ${localReportIds.length} local reports. Node cleanup will need a connection.`);
     }
-  }, [refreshNodeStatus, removeFromState, reports]);
+  }, [refreshNodeStatus, reports]);
 
   const value = useMemo(
     () => ({

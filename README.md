@@ -73,6 +73,7 @@ Backend routes:
 - `POST /sync`
 - `POST /reports/{id}/confirm`
 - `POST /reports/{id}/resolve`
+- `DELETE /reports`
 - `GET /node/status`
 - `WebSocket /ws`
 
@@ -90,6 +91,23 @@ If testing from another laptop or phone on the same Wi-Fi, start Vite with the h
 
 ```bash
 VITE_API_BASE_URL=http://YOUR_LAN_IP:8000 npm run dev -- --host 0.0.0.0
+```
+
+## Public Deployment
+
+The repo includes a root `Dockerfile` and `render.yaml` for a one-service Render deployment. The container builds the React frontend and serves it from FastAPI, so the live site and API share one public URL.
+
+1. Push this repo to GitHub.
+2. In Render, create a new Blueprint from the repo.
+3. Use the included `render.yaml`.
+4. After deploy, open the generated `https://...onrender.com` URL.
+
+The public deployment sets `RESCUEMESH_PUBLIC_MODE=true`, which requires an admin token for destructive endpoints like `DELETE /reports`. Public visitors can add, view, confirm, and resolve reports, but they cannot clear all reports from the browser UI.
+
+The default Render plan in `render.yaml` is free. Free services use ephemeral filesystem storage, so SQLite report data can disappear after restarts or deploys. For persistent public data, switch to a paid Render service, attach a persistent disk, and set:
+
+```text
+RESCUEMESH_DB_PATH=/var/data/rescuemesh.db
 ```
 
 ## Docker

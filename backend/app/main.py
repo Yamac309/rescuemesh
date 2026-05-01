@@ -1,8 +1,11 @@
 from datetime import datetime, timezone
 import os
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, Header, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import database
 from .schemas import ConfirmRequest, NodeStatus, Report, ReportCreate, SyncRequest, SyncResponse
@@ -55,10 +58,24 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+FRONTEND_DIST_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+FRONTEND_INDEX = FRONTEND_DIST_DIR / "index.html"
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def require_admin_token(x_admin_token: str | None = Header(default=None)) -> None:
+    admin_token = os.getenv("RESCUEMESH_ADMIN_TOKEN")
+    public_mode = os.getenv("RESCUEMESH_PUBLIC_MODE", "").lower() in {"1", "true", "yes"}
+
+    if not public_mode and not admin_token:
+        return
+    if admin_token and x_admin_token == admin_token:
+        return
+
+    raise HTTPException(status_code=403, detail="Admin token required")
 
 
 @app.on_event("startup")
@@ -129,7 +146,7 @@ async def resolve_report(report_id: str) -> dict:
     return report
 
 
-@app.delete("/demo/reports")
+@app.delete("/demo/reports", dependencies=[Depends(require_admin_token)])
 async def delete_demo_reports() -> dict:
     deleted_report_ids = database.delete_reports_by_titles(DEMO_REPORT_TITLES)
     if deleted_report_ids:
@@ -137,7 +154,7 @@ async def delete_demo_reports() -> dict:
     return {"deleted_report_ids": deleted_report_ids, "deleted_count": len(deleted_report_ids)}
 
 
-@app.delete("/reports")
+@app.delete("/reports", dependencies=[Depends(require_admin_token)])
 async def delete_all_reports() -> dict:
     deleted_report_ids = database.delete_all_reports()
     if deleted_report_ids:
@@ -167,3 +184,20 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+
+if FRONTEND_DIST_DIR.exists():
+    assets_dir = FRONTEND_DIST_DIR / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+
+    @app.get("/", include_in_schema=False)
+    def serve_frontend_index() -> FileResponse:
+        return FileResponse(FRONTEND_INDEX)
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_frontend_app(full_path: str) -> FileResponse:
+        requested_path = FRONTEND_DIST_DIR / full_path
+        if requested_path.is_file():
+            return FileResponse(requested_path)
+        return FileResponse(FRONTEND_INDEX)

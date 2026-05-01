@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: rescuemesh
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: RESCUEMESH_PUBLIC_MODE
+        value: "true"
+      - key: RESCUEMESH_NODE_NAME
+        value: RescueMesh Public Node
+      - key: RESCUEMESH_ADMIN_TOKEN
+        sync: false

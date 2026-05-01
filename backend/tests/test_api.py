@@ -107,3 +107,16 @@ def test_delete_all_reports(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.json()["deleted_count"] == 2
     assert client.get("/reports").json() == []
+
+
+def test_public_mode_requires_admin_token_for_delete(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RESCUEMESH_PUBLIC_MODE", "true")
+    monkeypatch.setenv("RESCUEMESH_ADMIN_TOKEN", "secret-token")
+    client.post("/reports", json=sample_report())
+
+    blocked = client.delete("/reports")
+    allowed = client.delete("/reports", headers={"X-Admin-Token": "secret-token"})
+
+    assert blocked.status_code == 403
+    assert allowed.status_code == 200
+    assert allowed.json()["deleted_count"] == 1
