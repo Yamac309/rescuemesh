@@ -49,6 +49,12 @@ export function resolveReport(reportId) {
   });
 }
 
+export function deleteDemoReports() {
+  return request("/demo/reports", {
+    method: "DELETE"
+  });
+}
+
 export function getNodeStatus() {
   return request("/node/status");
 }

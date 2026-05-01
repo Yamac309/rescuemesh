@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { confirmReport, createSocket, getHealth, getNodeStatus, resolveReport, syncReports } from "../api/client";
+import { confirmReport, createSocket, deleteDemoReports, getHealth, getNodeStatus, resolveReport, syncReports } from "../api/client";
 import {
   deleteQueuedAction,
+  deleteReportsByIds,
+  deleteReportsByTitles,
   getAllReports,
   getDeviceId,
   getQueuedActions,
@@ -9,6 +11,7 @@ import {
   saveReport,
   saveReports
 } from "../storage/indexedDb";
+import { DEMO_REPORT_TITLES } from "../utils/demoData";
 import { findPossibleDuplicate, mergeReport, normalizeReport, sortByNewest } from "../utils/reportUtils";
 
 export function useReports() {
@@ -30,6 +33,12 @@ export function useReports() {
       saveReports(merged).catch((error) => console.error("Unable to save reports locally", error));
       return merged;
     });
+  }, []);
+
+  const removeFromState = useCallback(async (reportIds) => {
+    if (!reportIds.length) return;
+    await deleteReportsByIds(reportIds);
+    setReports((currentReports) => currentReports.filter((report) => !reportIds.includes(report.report_id)));
   }, []);
 
   useEffect(() => {
@@ -113,6 +122,9 @@ export function useReports() {
           if (message.report) {
             mergeIntoState([message.report]);
           }
+          if (message.type === "reports:deleted" && message.report_ids) {
+            removeFromState(message.report_ids);
+          }
         };
         socket.onclose = () => {
           setBackendOnline(false);
@@ -128,7 +140,7 @@ export function useReports() {
       window.clearTimeout(retryTimer);
       if (socket) socket.close();
     };
-  }, [mergeIntoState]);
+  }, [mergeIntoState, removeFromState]);
 
   const createLocalReport = useCallback(
     async (report) => {
@@ -186,6 +198,20 @@ export function useReports() {
     [mergeIntoState, reports]
   );
 
+  const removeDemoReports = useCallback(async () => {
+    const localDeletedIds = await deleteReportsByTitles(DEMO_REPORT_TITLES);
+    setReports((currentReports) => currentReports.filter((report) => !DEMO_REPORT_TITLES.includes(report.title)));
+
+    try {
+      const response = await deleteDemoReports();
+      await removeFromState(response.deleted_report_ids || []);
+      await refreshNodeStatus();
+      setSyncStatus(`Removed ${Math.max(localDeletedIds.length, response.deleted_count || 0)} demo reports`);
+    } catch {
+      setSyncStatus(`Removed ${localDeletedIds.length} local demo reports. Node cleanup will need a connection.`);
+    }
+  }, [refreshNodeStatus, removeFromState]);
+
   const value = useMemo(
     () => ({
       reports,
@@ -197,6 +223,7 @@ export function useReports() {
       createLocalReport,
       confirmLocalReport,
       resolveLocalReport,
+      removeDemoReports,
       syncNow,
       refreshNodeStatus,
       mergeIntoState
@@ -211,6 +238,7 @@ export function useReports() {
       createLocalReport,
       confirmLocalReport,
       resolveLocalReport,
+      removeDemoReports,
       syncNow,
       refreshNodeStatus,
       mergeIntoState

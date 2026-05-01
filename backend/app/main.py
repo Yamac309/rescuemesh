@@ -10,6 +10,14 @@ from .schemas import ConfirmRequest, NodeStatus, Report, ReportCreate, SyncReque
 
 app = FastAPI(title="RescueMesh Node", version="0.1.0")
 
+DEMO_REPORT_TITLES = [
+    "Water available at library",
+    "Road blocked near main entrance",
+    "First aid station at gym",
+    "Charging station open at student center",
+    "Dangerous flooding near parking lot",
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("RESCUEMESH_CORS_ORIGINS", "*").split(","),
@@ -119,6 +127,14 @@ async def resolve_report(report_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Report not found")
     await manager.broadcast({"type": "report:updated", "report": report})
     return report
+
+
+@app.delete("/demo/reports")
+async def delete_demo_reports() -> dict:
+    deleted_report_ids = database.delete_reports_by_titles(DEMO_REPORT_TITLES)
+    if deleted_report_ids:
+        await manager.broadcast({"type": "reports:deleted", "report_ids": deleted_report_ids})
+    return {"deleted_report_ids": deleted_report_ids, "deleted_count": len(deleted_report_ids)}
 
 
 @app.get("/node/status", response_model=NodeStatus)

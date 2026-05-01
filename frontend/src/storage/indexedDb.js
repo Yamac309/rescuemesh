@@ -59,6 +59,26 @@ export async function saveReports(reports) {
   await Promise.all(reports.map((report) => saveReport(report)));
 }
 
+export async function deleteReportsByIds(reportIds) {
+  const { db, transaction, store } = await storeTransaction(REPORT_STORE, "readwrite");
+  return new Promise((resolve, reject) => {
+    reportIds.forEach((reportId) => store.delete(reportId));
+    transaction.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+export async function deleteReportsByTitles(titles) {
+  const reports = await getAllReports();
+  const titleSet = new Set(titles);
+  const reportIds = reports.filter((report) => titleSet.has(report.title)).map((report) => report.report_id);
+  await deleteReportsByIds(reportIds);
+  return reportIds;
+}
+
 export async function queueAction(action) {
   const { db, transaction, store } = await storeTransaction(ACTION_STORE, "readwrite");
   return new Promise((resolve, reject) => {

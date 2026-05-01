@@ -13,7 +13,7 @@ export const CATEGORIES = [
 export const URGENCY_LEVELS = ["Low", "Medium", "High", "Critical"];
 export const STATUSES = ["Unverified", "Confirmed", "Resolved"];
 
-export const DEFAULT_CENTER = [40.7128, -74.006];
+export const WORLD_CENTER = [20, 0];
 
 export const CATEGORY_MARKERS = {
   "Need Help": "HELP",

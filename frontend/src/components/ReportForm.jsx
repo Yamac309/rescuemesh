@@ -16,6 +16,7 @@ const initialForm = {
 export default function ReportForm({ deviceId, onSubmit }) {
   const [form, setForm] = useState(initialForm);
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState("info");
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -23,22 +24,42 @@ export default function ReportForm({ deviceId, onSubmit }) {
 
   function useCurrentLocation() {
     if (!navigator.geolocation) {
-      setMessage("Location is not available in this browser.");
+      setMessageTone("warning");
+      setMessage("This browser does not support device location. Enter the incident coordinates manually.");
       return;
     }
+
+    setMessageTone("info");
+    setMessage("Requesting your real device location...");
+
     navigator.geolocation.getCurrentPosition(
       (position) => {
         updateField("latitude", position.coords.latitude.toFixed(6));
         updateField("longitude", position.coords.longitude.toFixed(6));
-        setMessage("Location filled from this device.");
+        setMessageTone("success");
+        setMessage("Real device location filled from your browser.");
       },
-      () => setMessage("Unable to read device location. You can enter coordinates manually.")
+      (error) => {
+        const permissionDenied = error.code === error.PERMISSION_DENIED;
+        setMessageTone("warning");
+        setMessage(
+          permissionDenied
+            ? "Location permission was denied. Allow location access in the browser or enter coordinates manually."
+            : "The browser could not get a real device location. Enter the incident coordinates manually."
+        );
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 10000
+      }
     );
   }
 
   async function handleSubmit(event) {
     event.preventDefault();
     setMessage("");
+    setMessageTone("info");
 
     const report = {
       report_id: makeReportId(deviceId),
@@ -58,6 +79,7 @@ export default function ReportForm({ deviceId, onSubmit }) {
 
     const duplicate = await onSubmit(report);
     setForm(initialForm);
+    setMessageTone(duplicate ? "warning" : "success");
     setMessage(
       duplicate
         ? `This may be a duplicate of an existing report: "${duplicate.title}". The report was still saved.`
@@ -67,7 +89,7 @@ export default function ReportForm({ deviceId, onSubmit }) {
 
   return (
     <form className="report-form" onSubmit={handleSubmit}>
-      {message && <div className="notice">{message}</div>}
+      {message && <div className={`notice ${messageTone}`}>{message}</div>}
       <label>
         Title
         <input value={form.title} onChange={(event) => updateField("title", event.target.value)} required maxLength={120} />
@@ -121,6 +143,7 @@ export default function ReportForm({ deviceId, onSubmit }) {
           <LocateFixed size={20} />
         </button>
       </div>
+      <p className="field-help">Coordinates are the incident location. Use the location button only when the report is about where this device is right now.</p>
       <button type="submit" className="primary">
         Save Emergency Report
       </button>

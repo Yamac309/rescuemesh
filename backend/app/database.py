@@ -202,6 +202,25 @@ def resolve_report(report_id: str) -> dict | None:
     return get_report(report_id)
 
 
+def delete_reports_by_titles(titles: list[str]) -> list[str]:
+    if not titles:
+        return []
+
+    placeholders = ",".join("?" for _ in titles)
+    with get_connection() as db:
+        rows = db.execute(
+            f"SELECT report_id FROM reports WHERE title IN ({placeholders})",
+            titles,
+        ).fetchall()
+        report_ids = [row["report_id"] for row in rows]
+        if report_ids:
+            id_placeholders = ",".join("?" for _ in report_ids)
+            db.execute(f"DELETE FROM confirmations WHERE report_id IN ({id_placeholders})", report_ids)
+            db.execute(f"DELETE FROM reports WHERE report_id IN ({id_placeholders})", report_ids)
+        db.commit()
+    return report_ids
+
+
 def total_reports() -> int:
     with get_connection() as db:
         return db.execute("SELECT COUNT(*) AS count FROM reports").fetchone()["count"]

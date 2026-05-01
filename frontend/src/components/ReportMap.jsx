@@ -1,21 +1,25 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
-import { CATEGORY_MARKERS, DEFAULT_CENTER, URGENCY_CLASS } from "../utils/constants";
+import { LocateFixed } from "lucide-react";
+import { CATEGORY_MARKERS, URGENCY_CLASS, WORLD_CENTER } from "../utils/constants";
 
 export default function ReportMap({ reports }) {
   const mapRef = useRef(null);
   const containerRef = useRef(null);
   const markerLayerRef = useRef(null);
+  const userMarkerRef = useRef(null);
+  const [locationMessage, setLocationMessage] = useState("");
+  const [locationTone, setLocationTone] = useState("info");
 
   const center = useMemo(() => {
-    if (!reports.length) return DEFAULT_CENTER;
+    if (!reports.length) return WORLD_CENTER;
     return [reports[0].latitude, reports[0].longitude];
   }, [reports]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
-    mapRef.current = L.map(containerRef.current).setView(center, 14);
+    mapRef.current = L.map(containerRef.current).setView(center, reports.length ? 14 : 2);
     markerLayerRef.current = L.layerGroup().addTo(mapRef.current);
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -54,5 +58,64 @@ export default function ReportMap({ reports }) {
     }
   }, [reports]);
 
-  return <div className="map-panel" ref={containerRef} />;
+  function locateDevice() {
+    if (!navigator.geolocation) {
+      setLocationTone("warning");
+      setLocationMessage("This browser does not support device location.");
+      return;
+    }
+
+    setLocationTone("info");
+    setLocationMessage("Requesting your real device location...");
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const latLng = [position.coords.latitude, position.coords.longitude];
+        setLocationTone("success");
+        setLocationMessage(`Showing real device location: ${latLng[0].toFixed(5)}, ${latLng[1].toFixed(5)}`);
+
+        if (userMarkerRef.current) {
+          userMarkerRef.current.remove();
+        }
+
+        userMarkerRef.current = L.circleMarker(latLng, {
+          radius: 9,
+          color: "#155b3d",
+          fillColor: "#2fb36d",
+          fillOpacity: 0.9,
+          weight: 3
+        })
+          .bindPopup("Your real device location")
+          .addTo(mapRef.current);
+
+        mapRef.current.setView(latLng, 15);
+      },
+      (error) => {
+        const permissionDenied = error.code === error.PERMISSION_DENIED;
+        setLocationTone("warning");
+        setLocationMessage(
+          permissionDenied
+            ? "Location permission was denied. Allow location access in the browser to show your real position."
+            : "The browser could not get a real device location."
+        );
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 10000
+      }
+    );
+  }
+
+  return (
+    <div className="map-shell">
+      <div className="map-toolbar">
+        <button type="button" className="secondary" onClick={locateDevice}>
+          <LocateFixed size={18} /> Show My Real Location
+        </button>
+        {locationMessage && <span className={`location-message ${locationTone}`}>{locationMessage}</span>}
+      </div>
+      <div className="map-panel" ref={containerRef} />
+    </div>
+  );
 }

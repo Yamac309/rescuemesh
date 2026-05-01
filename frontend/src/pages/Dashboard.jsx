@@ -1,4 +1,4 @@
-import { Download, RefreshCw, Siren } from "lucide-react";
+import { Download, RefreshCw, Siren, Trash2 } from "lucide-react";
 import NodeStatusCard from "../components/NodeStatusCard";
 import ReportCard from "../components/ReportCard";
 import { makeDemoReports } from "../utils/demoData";
@@ -39,6 +39,9 @@ export default function Dashboard({ mesh }) {
           </button>
           <button className="secondary" onClick={seedDemoData}>
             <Siren size={18} /> Load Demo Data
+          </button>
+          <button className="secondary danger" onClick={mesh.removeDemoReports}>
+            <Trash2 size={18} /> Remove Demo Data
           </button>
         </div>
       </section>

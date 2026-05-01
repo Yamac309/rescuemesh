@@ -1,5 +1,13 @@
 import { makeReportId } from "./reportUtils";
 
+export const DEMO_REPORT_TITLES = [
+  "Water available at library",
+  "Road blocked near main entrance",
+  "First aid station at gym",
+  "Charging station open at student center",
+  "Dangerous flooding near parking lot"
+];
+
 export function makeDemoReports(deviceId) {
   const now = Date.now();
   const base = {
@@ -14,7 +22,7 @@ export function makeDemoReports(deviceId) {
     {
       ...base,
       report_id: makeReportId(deviceId),
-      title: "Water available at library",
+      title: DEMO_REPORT_TITLES[0],
       category: "Water",
       description: "Bottled water and refill station available near the main desk.",
       urgency: "Medium",
@@ -25,7 +33,7 @@ export function makeDemoReports(deviceId) {
     {
       ...base,
       report_id: makeReportId(deviceId),
-      title: "Road blocked near main entrance",
+      title: DEMO_REPORT_TITLES[1],
       category: "Blocked Road",
       description: "Tree and debris blocking the north entrance. Use the east access road.",
       urgency: "High",
@@ -36,7 +44,7 @@ export function makeDemoReports(deviceId) {
     {
       ...base,
       report_id: makeReportId(deviceId),
-      title: "First aid station at gym",
+      title: DEMO_REPORT_TITLES[2],
       category: "First Aid",
       description: "Volunteers with first aid kits are set up inside the gym lobby.",
       urgency: "High",
@@ -47,7 +55,7 @@ export function makeDemoReports(deviceId) {
     {
       ...base,
       report_id: makeReportId(deviceId),
-      title: "Charging station open at student center",
+      title: DEMO_REPORT_TITLES[3],
       category: "Charging",
       description: "Power strips available. Please limit charging to 20 minutes per device.",
       urgency: "Low",
@@ -58,7 +66,7 @@ export function makeDemoReports(deviceId) {
     {
       ...base,
       report_id: makeReportId(deviceId),
-      title: "Dangerous flooding near parking lot",
+      title: DEMO_REPORT_TITLES[4],
       category: "Dangerous Area",
       description: "Standing water is rising near the west parking lot. Avoid walking through it.",
       urgency: "Critical",
