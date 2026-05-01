@@ -55,6 +55,12 @@ export function deleteDemoReports() {
   });
 }
 
+export function deleteAllReports() {
+  return request("/reports", {
+    method: "DELETE"
+  });
+}
+
 export function getNodeStatus() {
   return request("/node/status");
 }

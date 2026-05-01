@@ -96,3 +96,14 @@ def test_delete_demo_reports(client: TestClient) -> None:
     assert response.json()["deleted_count"] == 1
     remaining_titles = [report["title"] for report in client.get("/reports").json()]
     assert remaining_titles == ["Custom field report"]
+
+
+def test_delete_all_reports(client: TestClient) -> None:
+    client.post("/reports", json=sample_report())
+    client.post("/reports", json=sample_report("second-report-1"))
+
+    response = client.delete("/reports")
+
+    assert response.status_code == 200
+    assert response.json()["deleted_count"] == 2
+    assert client.get("/reports").json() == []

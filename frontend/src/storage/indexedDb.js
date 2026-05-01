@@ -79,6 +79,16 @@ export async function deleteReportsByTitles(titles) {
   return reportIds;
 }
 
+export async function deleteAllReports() {
+  const { db, transaction, store } = await storeTransaction(REPORT_STORE, "readwrite");
+  return new Promise((resolve, reject) => {
+    const request = store.clear();
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => db.close();
+  });
+}
+
 export async function queueAction(action) {
   const { db, transaction, store } = await storeTransaction(ACTION_STORE, "readwrite");
   return new Promise((resolve, reject) => {

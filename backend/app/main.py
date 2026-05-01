@@ -137,6 +137,14 @@ async def delete_demo_reports() -> dict:
     return {"deleted_report_ids": deleted_report_ids, "deleted_count": len(deleted_report_ids)}
 
 
+@app.delete("/reports")
+async def delete_all_reports() -> dict:
+    deleted_report_ids = database.delete_all_reports()
+    if deleted_report_ids:
+        await manager.broadcast({"type": "reports:deleted", "report_ids": deleted_report_ids})
+    return {"deleted_report_ids": deleted_report_ids, "deleted_count": len(deleted_report_ids)}
+
+
 @app.get("/node/status", response_model=NodeStatus)
 def node_status() -> dict:
     return {

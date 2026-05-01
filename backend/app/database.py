@@ -221,6 +221,16 @@ def delete_reports_by_titles(titles: list[str]) -> list[str]:
     return report_ids
 
 
+def delete_all_reports() -> list[str]:
+    with get_connection() as db:
+        rows = db.execute("SELECT report_id FROM reports").fetchall()
+        report_ids = [row["report_id"] for row in rows]
+        db.execute("DELETE FROM confirmations")
+        db.execute("DELETE FROM reports")
+        db.commit()
+    return report_ids
+
+
 def total_reports() -> int:
     with get_connection() as db:
         return db.execute("SELECT COUNT(*) AS count FROM reports").fetchone()["count"]

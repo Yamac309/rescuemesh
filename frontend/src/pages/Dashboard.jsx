@@ -23,6 +23,13 @@ export default function Dashboard({ mesh }) {
     downloadFile("rescuemesh-incident-log.csv", toCsv(mesh.reports), "text/csv");
   }
 
+  function clearAllReports() {
+    const confirmed = window.confirm("Clear all reports from this browser and the shared RescueMesh Node?");
+    if (confirmed) {
+      mesh.clearAllReports();
+    }
+  }
+
   return (
     <div className="page-grid">
       <section className="hero-band">
@@ -42,6 +49,9 @@ export default function Dashboard({ mesh }) {
           </button>
           <button className="secondary danger" onClick={mesh.removeDemoReports}>
             <Trash2 size={18} /> Remove Demo Data
+          </button>
+          <button className="secondary danger" onClick={clearAllReports} disabled={!mesh.reports.length}>
+            <Trash2 size={18} /> Clear All Reports
           </button>
         </div>
       </section>
