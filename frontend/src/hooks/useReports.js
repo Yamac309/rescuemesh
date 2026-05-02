@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addResponderNote,
   confirmReport,
@@ -7,6 +7,7 @@ import {
   deleteDemoReports,
   getHealth,
   getNodeStatus,
+  getVerificationConfig,
   responderRejectReport,
   responderVerifyReport,
   resolveReport,
@@ -29,7 +30,15 @@ import {
   saveReports
 } from "../storage/indexedDb";
 import { DEMO_REPORT_TITLES } from "../utils/demoData";
-import { DEMO_TIME_OFFSET_KEY, findPossibleDuplicate, getDemoTimeOffsetHours, mergeReport, normalizeReport, sortByNewest } from "../utils/reportUtils";
+import {
+  DEMO_TIME_OFFSET_KEY,
+  estimateLocalVerification,
+  findPossibleDuplicate,
+  getDemoTimeOffsetHours,
+  mergeReport,
+  normalizeReport,
+  sortByNewest
+} from "../utils/reportUtils";
 
 export function useReports() {
   const [reports, setReports] = useState([]);
@@ -39,6 +48,8 @@ export function useReports() {
   const [nodeStatus, setNodeStatus] = useState(null);
   const [ignoredReportIds, setIgnoredReportIds] = useState([]);
   const [demoTimeOffsetHours, setDemoTimeOffsetHoursState] = useState(() => getDemoTimeOffsetHours());
+  const [verificationConfig, setVerificationConfig] = useState(null);
+  const clearInProgressRef = useRef(false);
 
   const visibleReports = useCallback(
     (candidateReports, ignoredIds = ignoredReportIds) => {
@@ -49,7 +60,9 @@ export function useReports() {
   );
 
   const mergeIntoState = useCallback(async (incomingReports) => {
+    if (clearInProgressRef.current) return;
     setReports((currentReports) => {
+      if (clearInProgressRef.current) return [];
       const byId = new Map(currentReports.map((report) => [report.report_id, report]));
       incomingReports.forEach((incoming) => {
         const normalized = normalizeReport(incoming);
@@ -77,6 +90,12 @@ export function useReports() {
       })
       .catch((error) => console.error("Unable to read local storage", error));
   }, [visibleReports]);
+
+  useEffect(() => {
+    getVerificationConfig()
+      .then(setVerificationConfig)
+      .catch(() => setVerificationConfig(null));
+  }, []);
 
   const refreshNodeStatus = useCallback(async () => {
     try {
@@ -111,11 +130,14 @@ export function useReports() {
   }, [mergeIntoState]);
 
   const syncNow = useCallback(async () => {
+    if (clearInProgressRef.current) return;
     const localReports = await getAllReports();
     const knownIds = localReports.map((report) => report.report_id);
 
     try {
+      if (clearInProgressRef.current) return;
       const response = await syncReports(knownIds, localReports);
+      if (clearInProgressRef.current) return;
       if (response.deleted_report_ids?.length) {
         await removeFromState(response.deleted_report_ids);
       }
@@ -176,12 +198,13 @@ export function useReports() {
   const createLocalReport = useCallback(
     async (report) => {
       const duplicate = findPossibleDuplicate(report, reports);
-      await saveReport(report);
-      await mergeIntoState([{ ...report, sync_state: "pending" }]);
+      const locallyVerifiedReport = estimateLocalVerification({ ...report, sync_state: "pending" }, reports, verificationConfig);
+      await saveReport(locallyVerifiedReport);
+      await mergeIntoState([locallyVerifiedReport]);
       syncNow();
       return duplicate;
     },
-    [mergeIntoState, reports, syncNow]
+    [mergeIntoState, reports, syncNow, verificationConfig]
   );
 
   const confirmLocalReport = useCallback(
@@ -277,22 +300,30 @@ export function useReports() {
 
   const clearAllReports = useCallback(async () => {
     const localReportIds = reports.map((report) => report.report_id);
+    let backendCleared = false;
+    clearInProgressRef.current = true;
+    setReports([]);
+    setIgnoredReportIds([]);
+    setNodeStatus((current) => current ? { ...current, total_reports: 0 } : current);
 
     try {
-      const response = await deleteAllReports();
       await deleteAllLocalReports();
       await clearIgnoredReports();
-      setIgnoredReportIds([]);
-      setReports([]);
+      const response = await deleteAllReports();
+      backendCleared = true;
+      await removeFromState(response.deleted_report_ids || localReportIds);
       await refreshNodeStatus();
     } catch {
       await deleteAllLocalReports();
       await clearIgnoredReports();
-      setIgnoredReportIds([]);
-      setReports([]);
       console.warn(`Cleared ${localReportIds.length} local reports. Node cleanup will need a connection.`);
+    } finally {
+      clearInProgressRef.current = false;
+      if (backendCleared) {
+        await syncNow();
+      }
     }
-  }, [refreshNodeStatus, reports]);
+  }, [refreshNodeStatus, removeFromState, reports, syncNow]);
 
   const setDemoTimeOffsetHours = useCallback((hours) => {
     const nextHours = Number(hours);

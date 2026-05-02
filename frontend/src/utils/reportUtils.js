@@ -4,6 +4,13 @@ const NEARBY_MATCH_DISTANCE_METERS = 300;
 const NEARBY_MATCH_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const DEMO_TIME_OFFSET_KEY = "rescuemesh-demo-time-offset-hours";
 
+const DEFAULT_EMERGENCY_ZONE = {
+  minLatitude: 40.7,
+  maxLatitude: 40.725,
+  minLongitude: -74.02,
+  maxLongitude: -73.99
+};
+
 export function getDemoTimeOffsetHours() {
   if (typeof localStorage === "undefined") return 0;
   return Number(localStorage.getItem(DEMO_TIME_OFFSET_KEY) || 0);
@@ -114,6 +121,160 @@ export function getVerificationLabel(report, reports = []) {
   if (score < 60) return "Unverified";
   if (score < 80) return "Likely Verified";
   return "Verified";
+}
+
+export function estimateLocalVerification(report, reports = [], config = {}) {
+  const zone = config.emergencyZone || DEFAULT_EMERGENCY_ZONE;
+  const knownLocations = config.knownLocations || [];
+  const freshness = getFreshness(report);
+  const similarReports = findSimilarNearbyReports(report, reports, {
+    distanceMeters: DUPLICATE_DISTANCE_METERS,
+    timeWindowMs: DUPLICATE_WINDOW_MS
+  });
+  const confirmationCount = report.uniqueConfirmationCount ?? report.unique_confirmation_count ?? report.confirmation_count ?? 0;
+  const seenByNodes = report.seenByNodes || report.seen_by_nodes || ["local-node"];
+  const knownLocation = nearestKnownLocation(report, knownLocations);
+  const insideEmergencyZone = isInsideEmergencyZone(report, zone);
+  const evidenceReasons = [];
+  const warningReasons = [];
+  let score = 30;
+
+  if (insideEmergencyZone) {
+    score += 10;
+    evidenceReasons.push("Report is inside the configured emergency area.");
+  } else {
+    score -= 30;
+    warningReasons.push("Report is outside the configured emergency area.");
+  }
+
+  if (freshness.label === "Fresh") {
+    score += 10;
+    evidenceReasons.push("Report is less than 1 hour old.");
+  } else if (freshness.label === "Aging") {
+    score -= 20;
+    warningReasons.push("This report is aging. Verify before relying on it.");
+  } else if (freshness.label === "Stale") {
+    score -= 35;
+    warningReasons.push("This report is old. Verify before relying on it.");
+  }
+
+  if (knownLocation) {
+    score += 10;
+    evidenceReasons.push(`Report is near known location: ${knownLocation.name}.`);
+  }
+
+  if (similarReports.length) {
+    score += 15;
+    evidenceReasons.push("Similar nearby reports were found.");
+  }
+
+  if (confirmationCount) {
+    score += Math.min(confirmationCount, 3) * 10;
+    evidenceReasons.push(`${confirmationCount} unique confirmations.`);
+  }
+
+  if (report.responderVerified || report.responder_verified) {
+    score += 30;
+    evidenceReasons.push("Responder verified this report.");
+  } else {
+    warningReasons.push("No responder verification yet.");
+  }
+
+  if (report.responderRejected || report.responder_rejected) {
+    score -= 40;
+    warningReasons.push("Responder rejected this report.");
+  }
+
+  if (report.photoEvidenceAttached || report.photo_evidence_attached) {
+    score += 10;
+    evidenceReasons.push("Photo evidence attached.");
+  }
+
+  if (seenByNodes.length >= 2) {
+    score += 10;
+    evidenceReasons.push("Report has been seen by multiple nodes.");
+  }
+
+  score = Math.max(0, Math.min(100, score));
+  const verificationLabel = labelForScore(score, Boolean(report.responderRejected || report.responder_rejected));
+  const status = report.status !== "Resolved" && score < 30 ? "Needs Review" : report.status;
+
+  return {
+    ...report,
+    confidenceScore: score,
+    confidence_score: score,
+    verificationLabel,
+    verification_label: verificationLabel,
+    evidenceReasons,
+    evidence_reasons: evidenceReasons,
+    warningReasons,
+    warning_reasons: warningReasons,
+    agingLabel: freshness.label,
+    aging_label: freshness.label,
+    status,
+    verificationSignals: {
+      insideEmergencyZone,
+      nearKnownLocation: Boolean(knownLocation),
+      knownLocationName: knownLocation?.name || null,
+      isFresh: freshness.label === "Fresh",
+      isStale: freshness.label === "Stale",
+      hasSimilarNearbyReports: Boolean(similarReports.length),
+      similarReportCount: similarReports.length,
+      uniqueConfirmationCount: confirmationCount,
+      responderVerified: Boolean(report.responderVerified || report.responder_verified),
+      responderRejected: Boolean(report.responderRejected || report.responder_rejected),
+      deviceTrustScore: report.verificationSignals?.deviceTrustScore ?? 70,
+      suspiciousDeviceActivity: false,
+      photoEvidenceAttached: Boolean(report.photoEvidenceAttached || report.photo_evidence_attached),
+      seenByNodeCount: seenByNodes.length
+    },
+    verification_signals: {
+      insideEmergencyZone,
+      nearKnownLocation: Boolean(knownLocation),
+      knownLocationName: knownLocation?.name || null,
+      isFresh: freshness.label === "Fresh",
+      isStale: freshness.label === "Stale",
+      hasSimilarNearbyReports: Boolean(similarReports.length),
+      similarReportCount: similarReports.length,
+      uniqueConfirmationCount: confirmationCount,
+      responderVerified: Boolean(report.responderVerified || report.responder_verified),
+      responderRejected: Boolean(report.responderRejected || report.responder_rejected),
+      deviceTrustScore: report.verificationSignals?.deviceTrustScore ?? 70,
+      suspiciousDeviceActivity: false,
+      photoEvidenceAttached: Boolean(report.photoEvidenceAttached || report.photo_evidence_attached),
+      seenByNodeCount: seenByNodes.length
+    }
+  };
+}
+
+function labelForScore(score, responderRejected = false) {
+  if (responderRejected) return "Low Trust";
+  if (score < 30) return "Low Trust";
+  if (score < 60) return "Unverified";
+  if (score < 80) return "Likely Verified";
+  return "Verified";
+}
+
+function isInsideEmergencyZone(report, zone) {
+  return (
+    zone.minLatitude <= report.latitude &&
+    report.latitude <= zone.maxLatitude &&
+    zone.minLongitude <= report.longitude &&
+    report.longitude <= zone.maxLongitude
+  );
+}
+
+function nearestKnownLocation(report, knownLocations) {
+  let nearest = null;
+  let nearestDistance = Infinity;
+  knownLocations.forEach((location) => {
+    const distance = haversineMeters(report, location);
+    if (distance < nearestDistance) {
+      nearest = location;
+      nearestDistance = distance;
+    }
+  });
+  return nearest && nearestDistance <= 180 ? nearest : null;
 }
 
 export function sourceTrustLabel(report) {

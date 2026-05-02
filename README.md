@@ -2,7 +2,7 @@
 
 RescueMesh is an offline-first emergency communication and resource mapping platform. It lets people create local incident reports for help requests, water, food, shelter, first aid, charging, blocked roads, dangerous areas, and general updates even when internet or cellular service is unavailable.
 
-The MVP uses browser IndexedDB for device-first storage, a FastAPI/SQLite local node for persistence, WebSockets for real-time LAN updates, and Leaflet/OpenStreetMap for development maps. It does not use paid APIs or Google Maps.
+The MVP uses browser IndexedDB for device-first storage, a FastAPI/SQLite local node for persistence, WebSockets for real-time LAN updates, Google Maps for map display, and Street View for nearby visual context.
 
 ## Problem
 
@@ -23,7 +23,7 @@ RescueMesh treats every browser as a local-first field notebook. Reports are gen
 - Backend: FastAPI
 - Database: SQLite
 - Realtime sync: WebSockets
-- Map: Leaflet with OpenStreetMap development tiles
+- Map: Google Maps JavaScript API with Street View
 - Styling: plain CSS
 - Tests: pytest for backend API behavior
 
@@ -106,6 +106,16 @@ npm run dev
 ```
 
 Open `http://localhost:5173`.
+
+Google Maps and Street View require a browser key from Google Maps Platform:
+
+```bash
+cp frontend/.env.example frontend/.env
+# Then add your browser key to frontend/.env
+VITE_GOOGLE_MAPS_API_KEY=your_google_maps_browser_key
+```
+
+Enable the **Maps JavaScript API** in Google Cloud and restrict the key by HTTP referrer for your local/dev/deployed domains. This is separate from the backend Gemini key.
 
 If testing from another laptop or phone on the same Wi-Fi, start Vite with the host enabled and point the frontend to the backend machine:
 
@@ -212,7 +222,7 @@ If Google AI is not configured, unavailable, or rate limited, the backend return
 - WebSocket broadcasts for new and updated reports
 - Duplicate report ID prevention
 - Duplicate warning for similar category/title/location/time reports
-- Leaflet emergency map
+- Google Maps emergency map with Street View support
 - Category, urgency, and status filters
 - Report list view
 - Timeline view
@@ -236,7 +246,7 @@ If Google AI is not configured, unavailable, or rate limited, the backend return
 - Mesh networking is simulated through a local FastAPI node and WebSockets on Wi-Fi/LAN.
 - Browser-to-browser sync happens through the node, not direct peer-to-peer radios.
 - Offline confirmations/resolves are queued locally and replayed when the backend is reachable.
-- Leaflet uses online OpenStreetMap development tiles. A TODO in `ReportMap.jsx` marks where offline tiles should be configured.
+- Google Maps and Street View require Google Maps Platform access and billing. Offline map tile packs remain a future improvement for field deployments.
 
 ## Future Improvements
 

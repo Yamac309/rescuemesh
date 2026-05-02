@@ -562,6 +562,60 @@ textarea {
   box-shadow: var(--shadow);
 }
 
+.google-map-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 36%);
+  gap: 12px;
+}
+
+.google-map-panel {
+  position: relative;
+}
+
+.map-empty-state {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #f6f8f7;
+  color: #35413d;
+  font-weight: 800;
+  text-align: center;
+}
+
+.street-view-panel {
+  display: grid;
+  grid-template-rows: minmax(360px, 1fr) auto;
+  gap: 8px;
+  min-height: 480px;
+}
+
+.street-view-canvas {
+  min-height: 360px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #eef2ef;
+  box-shadow: var(--shadow);
+}
+
+.street-view-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.google-map-popup {
+  max-width: 260px;
+}
+
+.google-map-popup p {
+  margin: 4px 0;
+}
+
 .map-list {
   display: grid;
   gap: 12px;
@@ -829,6 +883,7 @@ textarea {
   .status-grid,
   .report-grid,
   .ai-guidance-grid,
+  .google-map-grid,
   .responder-review,
   .map-layout,
   .form-grid,
