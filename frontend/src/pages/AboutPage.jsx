@@ -28,6 +28,30 @@ export default function AboutPage() {
           packs can be added later.
         </p>
       </section>
+      <section className="info-panel">
+        <h2>Trust and freshness</h2>
+        <p>
+          Emergency information gets old quickly, so RescueMesh marks reports as Fresh, Recent, Aging, or Stale based on age. Each report also shows a confidence score
+          derived from confirmations, report age, resolved status, and similar nearby reports from other devices.
+        </p>
+      </section>
+      <section className="info-panel">
+        <h2>Privacy model</h2>
+        <ul className="plain-list">
+          <li>No real names are required.</li>
+          <li>Each browser uses an anonymous device ID instead of a personal profile.</li>
+          <li>Location is attached only to the report being created; the app does not continuously track users.</li>
+          <li>Reports can be exported as JSON or CSV for incident handoff.</li>
+          <li>Trusted or responder workflows should not expose private user data.</li>
+        </ul>
+      </section>
+      <section className="info-panel">
+        <h2>Category guidance</h2>
+        <p>
+          Report cards include simple safety guidance for each category, such as avoiding blocked roads, checking report age before relying on water or food locations, and
+          calling emergency services for life-threatening first aid situations when possible.
+        </p>
+      </section>
     </div>
   );
 }

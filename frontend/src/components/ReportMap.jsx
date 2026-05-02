@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import { LocateFixed } from "lucide-react";
 import { CATEGORY_MARKERS, URGENCY_CLASS, WORLD_CENTER } from "../utils/constants";
+import { calculateConfidence, getFreshness, getVerificationLabel } from "../utils/reportUtils";
 
-export default function ReportMap({ reports }) {
+export default function ReportMap({ reports, allReports = reports }) {
   const mapRef = useRef(null);
   const containerRef = useRef(null);
   const markerLayerRef = useRef(null);
@@ -35,9 +36,12 @@ export default function ReportMap({ reports }) {
     markerLayerRef.current.clearLayers();
 
     reports.forEach((report) => {
+      const freshness = getFreshness(report);
+      const confidence = calculateConfidence(report, allReports);
+      const verificationLabel = getVerificationLabel(report, allReports);
       const marker = L.marker([report.latitude, report.longitude], {
         icon: L.divIcon({
-          className: `mesh-marker ${URGENCY_CLASS[report.urgency]}`,
+          className: `mesh-marker ${URGENCY_CLASS[report.urgency]} marker-${verificationLabel.toLowerCase().replaceAll(" ", "-")} ${report.status === "Resolved" ? "marker-resolved" : ""} ${freshness.label === "Stale" ? "marker-stale" : ""}`,
           html: `<span>${CATEGORY_MARKERS[report.category] || "INFO"}</span>`,
           iconSize: [46, 30],
           iconAnchor: [23, 30]
@@ -48,6 +52,9 @@ export default function ReportMap({ reports }) {
         ${report.description || ""}<br />
         <b>Urgency:</b> ${report.urgency}<br />
         <b>Status:</b> ${report.status}<br />
+        <b>Verification:</b> ${verificationLabel}<br />
+        <b>Freshness:</b> ${freshness.label}<br />
+        <b>Confidence:</b> ${confidence}%<br />
         <b>Time:</b> ${new Date(report.timestamp).toLocaleString()}
       `);
       marker.addTo(markerLayerRef.current);
@@ -56,7 +63,7 @@ export default function ReportMap({ reports }) {
     if (reports.length) {
       mapRef.current.fitBounds(reports.map((report) => [report.latitude, report.longitude]), { padding: [30, 30], maxZoom: 15 });
     }
-  }, [reports]);
+  }, [reports, allReports]);
 
   function locateDevice() {
     if (!navigator.geolocation) {

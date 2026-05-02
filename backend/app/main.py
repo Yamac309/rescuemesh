@@ -6,10 +6,25 @@ from fastapi import Depends, Header, FastAPI, HTTPException, WebSocket, WebSocke
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from dotenv import load_dotenv
 
 from . import database
-from .schemas import ConfirmRequest, NodeStatus, Report, ReportCreate, SyncRequest, SyncResponse
+from .config.emergency_zone import get_emergency_zone, get_node_id
+from .services.incident_guidance import generate_incident_guidance
+from .services.location_checks import get_known_locations
+from .schemas import (
+    ConfirmRequest,
+    IncidentGuidanceRequest,
+    IncidentGuidanceResponse,
+    NodeStatus,
+    Report,
+    ReportCreate,
+    ResponderNoteRequest,
+    SyncRequest,
+    SyncResponse,
+)
 
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 app = FastAPI(title="RescueMesh Node", version="0.1.0")
 
@@ -93,6 +108,11 @@ def list_reports() -> list[dict]:
     return database.get_all_reports()
 
 
+@app.get("/reports/needs-review", response_model=list[Report])
+def needs_review_reports() -> list[dict]:
+    return database.get_needs_review_reports()
+
+
 @app.post("/reports", response_model=Report, status_code=201)
 async def create_report(report: ReportCreate) -> dict:
     inserted, saved_report = database.insert_report(report)
@@ -108,12 +128,13 @@ async def sync_reports(payload: SyncRequest) -> dict:
 
     for report in payload.reports:
         inserted, saved_report = database.insert_report(report)
-        if inserted:
+        if inserted and saved_report:
             accepted_reports.append(saved_report)
         else:
             duplicate_report_ids.append(report.report_id)
 
     missing_reports = database.get_reports_missing_from_client(payload.known_report_ids)
+    deleted_report_ids = database.get_deleted_report_ids()
     database.set_meta("last_sync_time", utc_now())
 
     for report in accepted_reports:
@@ -123,6 +144,7 @@ async def sync_reports(payload: SyncRequest) -> dict:
         "missing_reports": missing_reports,
         "accepted_reports": accepted_reports,
         "duplicate_report_ids": duplicate_report_ids,
+        "deleted_report_ids": deleted_report_ids,
         "backend_report_ids": database.get_report_ids(),
         "total_reports": database.total_reports(),
     }
@@ -140,6 +162,33 @@ async def confirm_report(report_id: str, payload: ConfirmRequest) -> dict:
 @app.post("/reports/{report_id}/resolve", response_model=Report)
 async def resolve_report(report_id: str) -> dict:
     report = database.resolve_report(report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    await manager.broadcast({"type": "report:updated", "report": report})
+    return report
+
+
+@app.post("/reports/{report_id}/responder-verify", response_model=Report)
+async def responder_verify_report(report_id: str) -> dict:
+    report = database.responder_verify(report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    await manager.broadcast({"type": "report:updated", "report": report})
+    return report
+
+
+@app.post("/reports/{report_id}/responder-reject", response_model=Report)
+async def responder_reject_report(report_id: str) -> dict:
+    report = database.responder_reject(report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    await manager.broadcast({"type": "report:updated", "report": report})
+    return report
+
+
+@app.post("/reports/{report_id}/responder-note", response_model=Report)
+async def add_responder_note(report_id: str, payload: ResponderNoteRequest) -> dict:
+    report = database.responder_note(report_id, payload.note)
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
     await manager.broadcast({"type": "report:updated", "report": report})
@@ -171,6 +220,34 @@ def node_status() -> dict:
         "last_sync_time": database.get_meta("last_sync_time"),
         "backend_health": "ok",
     }
+
+
+@app.get("/verification/config")
+def verification_config() -> dict:
+    return {
+        "nodeId": get_node_id(),
+        "emergencyZone": get_emergency_zone(),
+        "knownLocations": get_known_locations(),
+        "scoring": {
+            "baseScore": 30,
+            "confirmationMax": 30,
+            "similarNearbyRadiusMeters": 250,
+            "similarNearbyWindowHours": 6,
+        },
+    }
+
+
+@app.get("/ai/status")
+def ai_status() -> dict:
+    return {
+        "googleAiConfigured": bool(os.getenv("GOOGLE_AI_API_KEY")),
+        "model": os.getenv("GOOGLE_AI_MODEL", "gemini-2.5-flash-lite"),
+    }
+
+
+@app.post("/ai/incident-guidance", response_model=IncidentGuidanceResponse)
+async def incident_guidance(payload: IncidentGuidanceRequest) -> dict:
+    return await generate_incident_guidance(payload)
 
 
 @app.websocket("/ws")

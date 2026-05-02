@@ -1,0 +1,11 @@
+[
+  {"name": "Library", "category": "Water", "latitude": 40.7136, "longitude": -74.0052},
+  {"name": "Student Center", "category": "Charging", "latitude": 40.7116, "longitude": -74.0044},
+  {"name": "Gym", "category": "First Aid", "latitude": 40.7150, "longitude": -74.0039},
+  {"name": "Health Center", "category": "First Aid", "latitude": 40.7142, "longitude": -74.0028},
+  {"name": "Police Station", "category": "General Update", "latitude": 40.7162, "longitude": -74.0066},
+  {"name": "Main Entrance", "category": "Blocked Road", "latitude": 40.7122, "longitude": -74.0082},
+  {"name": "Parking Lot 4", "category": "Dangerous Area", "latitude": 40.7109, "longitude": -74.0071},
+  {"name": "Shelter Area", "category": "Shelter", "latitude": 40.7130, "longitude": -74.0015},
+  {"name": "Dining Hall", "category": "Food", "latitude": 40.7124, "longitude": -74.0032}
+]

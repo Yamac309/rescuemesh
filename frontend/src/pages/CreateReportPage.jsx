@@ -9,7 +9,7 @@ export default function CreateReportPage({ mesh }) {
           <h1>Create Report</h1>
         </div>
       </section>
-      <ReportForm deviceId={mesh.deviceId} onSubmit={mesh.createLocalReport} />
+      <ReportForm deviceId={mesh.deviceId} reports={mesh.reports} onSubmit={mesh.createLocalReport} />
     </div>
   );
 }

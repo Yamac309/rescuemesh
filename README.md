@@ -33,6 +33,9 @@ RescueMesh treats every browser as a local-first field notebook. Reports are gen
 rescuemesh/
   backend/
     app/
+      config/
+      data/
+      services/
       database.py
       main.py
       schemas.py
@@ -73,9 +76,26 @@ Backend routes:
 - `POST /sync`
 - `POST /reports/{id}/confirm`
 - `POST /reports/{id}/resolve`
+- `POST /reports/{id}/responder-verify`
+- `POST /reports/{id}/responder-reject`
+- `POST /reports/{id}/responder-note`
+- `GET /reports/needs-review`
+- `GET /verification/config`
+- `POST /ai/incident-guidance`
 - `DELETE /reports`
 - `GET /node/status`
 - `WebSocket /ws`
+
+Optional Google AI guidance:
+
+```bash
+cp backend/.env.example backend/.env
+# Then add your key to backend/.env, or export it in your terminal.
+export GOOGLE_AI_API_KEY=your_google_ai_studio_key
+export GOOGLE_AI_MODEL=gemini-2.5-flash-lite
+```
+
+`GOOGLE_AI_API_KEY` is only read by the FastAPI backend. Do not put it in the frontend `.env` file. If the key is missing, RescueMesh still runs and shows a clear Gemini-unavailable state instead of prewritten advice. You can check the active backend mode at `GET /ai/status`.
 
 ### Frontend
 
@@ -131,6 +151,56 @@ Then open `http://localhost:5173`.
 
 The frontend sends known report IDs and local reports to `/sync`. The backend stores new report IDs, ignores duplicate report IDs, returns reports the client is missing, and broadcasts new/updated reports to connected WebSocket clients.
 
+## Multi-Signal Report Verification
+
+RescueMesh does not trust reports only because people click confirm. In emergencies, false or outdated information can be dangerous, so the verification engine helps users and responders quickly understand whether a report is fresh, trusted, suspicious, stale, or officially verified.
+
+Each report receives:
+
+- `confidenceScore` from 0 to 100
+- `verificationLabel`: `Low Trust`, `Unverified`, `Likely Verified`, or `Verified`
+- evidence reasons explaining what helped the score
+- warning reasons explaining risk
+- verification signals for zone checks, known locations, freshness, similar reports, confirmations, responder review, device trust, suspicious activity, photo evidence, and cross-node visibility
+
+The backend verification modules live under `backend/app/services/`:
+
+- `verification.py`: combines all signals into the final score and label
+- `duplicate_detection.py`: finds similar nearby reports with keyword overlap, Haversine distance, and time windows
+- `device_trust.py`: scores anonymous devices and flags suspicious activity
+- `location_checks.py`: checks the emergency zone and known official locations
+
+The configurable emergency zone is in `backend/app/config/emergency_zone.py`. For the MVP it is a bounding box with `minLatitude`, `maxLatitude`, `minLongitude`, and `maxLongitude`. Known locations are seeded in `backend/app/data/known_locations.json`.
+
+Signals currently used:
+
+- user confirmations
+- emergency zone checks
+- known location matching
+- report freshness and staleness
+- similar nearby reports
+- anonymous device trust
+- responder verification or rejection
+- suspicious activity detection
+- optional photo evidence flag
+- cross-node visibility through `seenByNodes`
+
+Status rules:
+
+- `Resolved` overrides verification status.
+- responder rejection forces `Low Trust`
+- at least two unique confirmations or confidence `80+` can mark a report `Confirmed`
+- suspicious reports or confidence below `30` become `Needs Review`
+- the same device cannot confirm the same report twice
+
+The UI shows confidence, verification label, aging label, evidence, warnings, source trust label, Gemini incident guidance, responder actions, and filters for verification state, confidence, age, suspicious reports, stale reports, and responder-verified reports.
+
+## AI Incident Guidance
+
+Report cards include incident-specific guidance with “Best things to do” and “Avoid” lists. When `GOOGLE_AI_API_KEY` is configured on the backend, RescueMesh calls Google Gemini through the `generateContent` API using the `gemini-2.5-flash-lite` model by default. The frontend never receives the API key.
+
+If Google AI is not configured, unavailable, or rate limited, the backend returns a short “Gemini guidance is unavailable” state instead of showing prewritten advice. That keeps the guidance section clearly AI-powered.
+
 ## MVP Features
 
 - Offline-first emergency report creation
@@ -147,6 +217,13 @@ The frontend sends known report IDs and local reports to `/sync`. The backend st
 - Report list view
 - Timeline view
 - Node status page
+- Responder Mode page
+- Multi-signal confidence score and verification label
+- Optional Google AI incident guidance with a clear unavailable state when quota or configuration is missing
+- Evidence and warning explanations on report cards
+- Emergency zone and known location matching
+- Anonymous device trust labels
+- Suspicious activity detection and Needs Review status
 - Confirmation count
 - Two confirmations automatically mark a report `Confirmed`
 - Same local device cannot confirm the same report twice

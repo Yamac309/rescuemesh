@@ -15,10 +15,10 @@ export default function NodeStatusPage({ mesh }) {
       </section>
       <NodeStatusCard {...mesh} />
       <section className="info-panel">
-        <h2>Local Network Node Mode</h2>
+        <h2>Online Response Node</h2>
         <p>
-          The FastAPI backend acts as a RescueMesh Node for this MVP. Browsers on the same local network can point to this node, exchange report IDs, upload missing reports,
-          receive missing reports, and get WebSocket broadcasts when another client adds or updates an incident.
+          The FastAPI backend acts as the active RescueMesh response node for this MVP. Browsers connect to this node, exchange reports, and receive WebSocket broadcasts
+          when another client adds or updates an incident.
         </p>
       </section>
     </div>

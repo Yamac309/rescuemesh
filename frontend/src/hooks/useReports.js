@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { confirmReport, createSocket, deleteAllReports, deleteDemoReports, getHealth, getNodeStatus, resolveReport, syncReports } from "../api/client";
+import {
+  addResponderNote,
+  confirmReport,
+  createSocket,
+  deleteAllReports,
+  deleteDemoReports,
+  getHealth,
+  getNodeStatus,
+  responderRejectReport,
+  responderVerifyReport,
+  resolveReport,
+  syncReports
+} from "../api/client";
 import {
   clearIgnoredReports,
   deleteAllReports as deleteAllLocalReports,
@@ -17,16 +29,16 @@ import {
   saveReports
 } from "../storage/indexedDb";
 import { DEMO_REPORT_TITLES } from "../utils/demoData";
-import { findPossibleDuplicate, mergeReport, normalizeReport, sortByNewest } from "../utils/reportUtils";
+import { DEMO_TIME_OFFSET_KEY, findPossibleDuplicate, getDemoTimeOffsetHours, mergeReport, normalizeReport, sortByNewest } from "../utils/reportUtils";
 
 export function useReports() {
   const [reports, setReports] = useState([]);
   const [deviceId] = useState(() => getDeviceId());
-  const [syncStatus, setSyncStatus] = useState("Loading local cache");
   const [lastSyncTime, setLastSyncTime] = useState(null);
   const [backendOnline, setBackendOnline] = useState(false);
   const [nodeStatus, setNodeStatus] = useState(null);
   const [ignoredReportIds, setIgnoredReportIds] = useState([]);
+  const [demoTimeOffsetHours, setDemoTimeOffsetHoursState] = useState(() => getDemoTimeOffsetHours());
 
   const visibleReports = useCallback(
     (candidateReports, ignoredIds = ignoredReportIds) => {
@@ -62,9 +74,8 @@ export function useReports() {
       .then(([localReports, ignoredIds]) => {
         setIgnoredReportIds(ignoredIds);
         setReports(visibleReports(localReports, ignoredIds));
-        setSyncStatus(localReports.length ? "Loaded from this device" : "Ready for reports");
       })
-      .catch(() => setSyncStatus("Unable to read local storage"));
+      .catch((error) => console.error("Unable to read local storage", error));
   }, [visibleReports]);
 
   const refreshNodeStatus = useCallback(async () => {
@@ -75,7 +86,7 @@ export function useReports() {
       return status;
     } catch {
       setBackendOnline(false);
-      setNodeStatus((current) => current || { backend_health: "offline", connected_clients: 0, total_reports: reports.length });
+      setNodeStatus((current) => current || { backend_health: "ok", connected_clients: 0, total_reports: reports.length });
       return null;
     }
   }, [reports.length]);
@@ -102,23 +113,26 @@ export function useReports() {
   const syncNow = useCallback(async () => {
     const localReports = await getAllReports();
     const knownIds = localReports.map((report) => report.report_id);
-    setSyncStatus("Syncing with local node");
 
     try {
       const response = await syncReports(knownIds, localReports);
+      if (response.deleted_report_ids?.length) {
+        await removeFromState(response.deleted_report_ids);
+      }
+      const deletedIds = new Set(response.deleted_report_ids || []);
       const syncedLocal = localReports.map((report) => ({ ...report, sync_state: "synced" }));
-      await saveReports([...syncedLocal, ...response.missing_reports, ...response.accepted_reports]);
-      await mergeIntoState([...syncedLocal, ...response.missing_reports, ...response.accepted_reports]);
+      const activeSyncedLocal = syncedLocal.filter((report) => !deletedIds.has(report.report_id));
+      await saveReports([...activeSyncedLocal, ...response.missing_reports, ...response.accepted_reports]);
+      await mergeIntoState([...activeSyncedLocal, ...response.missing_reports, ...response.accepted_reports]);
       await replayQueuedActions();
       await refreshNodeStatus();
       setBackendOnline(true);
-      setLastSyncTime(new Date().toISOString());
-      setSyncStatus(`Synced ${response.total_reports} reports with node`);
+      const syncedAt = new Date();
+      setLastSyncTime(syncedAt.toISOString());
     } catch {
       setBackendOnline(false);
-      setSyncStatus("Offline mode: reports are saved on this device");
     }
-  }, [mergeIntoState, refreshNodeStatus, replayQueuedActions]);
+  }, [mergeIntoState, refreshNodeStatus, removeFromState, replayQueuedActions]);
 
   useEffect(() => {
     syncNow();
@@ -215,12 +229,35 @@ export function useReports() {
     [mergeIntoState, reports]
   );
 
+  const responderVerifyLocalReport = useCallback(
+    async (reportId) => {
+      const updated = await responderVerifyReport(reportId);
+      await mergeIntoState([updated]);
+    },
+    [mergeIntoState]
+  );
+
+  const responderRejectLocalReport = useCallback(
+    async (reportId) => {
+      const updated = await responderRejectReport(reportId);
+      await mergeIntoState([updated]);
+    },
+    [mergeIntoState]
+  );
+
+  const addResponderNoteToReport = useCallback(
+    async (reportId, note) => {
+      const updated = await addResponderNote(reportId, note);
+      await mergeIntoState([updated]);
+    },
+    [mergeIntoState]
+  );
+
   const ignoreLocalReport = useCallback(
     async (reportId) => {
       await ignoreReport(reportId);
       setIgnoredReportIds((currentIds) => (currentIds.includes(reportId) ? currentIds : [...currentIds, reportId]));
       setReports((currentReports) => currentReports.filter((report) => report.report_id !== reportId));
-      setSyncStatus("Report ignored on this device only");
     },
     []
   );
@@ -233,9 +270,8 @@ export function useReports() {
       const response = await deleteDemoReports();
       await removeFromState(response.deleted_report_ids || []);
       await refreshNodeStatus();
-      setSyncStatus(`Removed ${Math.max(localDeletedIds.length, response.deleted_count || 0)} demo reports`);
     } catch {
-      setSyncStatus(`Removed ${localDeletedIds.length} local demo reports. Node cleanup will need a connection.`);
+      console.warn(`Removed ${localDeletedIds.length} local demo reports. Node cleanup will need a connection.`);
     }
   }, [refreshNodeStatus, removeFromState]);
 
@@ -249,30 +285,39 @@ export function useReports() {
       setIgnoredReportIds([]);
       setReports([]);
       await refreshNodeStatus();
-      setSyncStatus(`Cleared ${Math.max(localReportIds.length, response.deleted_count || 0)} reports`);
     } catch {
       await deleteAllLocalReports();
       await clearIgnoredReports();
       setIgnoredReportIds([]);
       setReports([]);
-      setSyncStatus(`Cleared ${localReportIds.length} local reports. Node cleanup will need a connection.`);
+      console.warn(`Cleared ${localReportIds.length} local reports. Node cleanup will need a connection.`);
     }
   }, [refreshNodeStatus, reports]);
+
+  const setDemoTimeOffsetHours = useCallback((hours) => {
+    const nextHours = Number(hours);
+    localStorage.setItem(DEMO_TIME_OFFSET_KEY, String(nextHours));
+    setDemoTimeOffsetHoursState(nextHours);
+  }, []);
 
   const value = useMemo(
     () => ({
       reports,
       deviceId,
-      syncStatus,
       lastSyncTime,
       backendOnline,
       nodeStatus,
+      demoTimeOffsetHours,
       createLocalReport,
       confirmLocalReport,
       resolveLocalReport,
+      responderVerifyLocalReport,
+      responderRejectLocalReport,
+      addResponderNoteToReport,
       ignoreLocalReport,
       removeDemoReports,
       clearAllReports,
+      setDemoTimeOffsetHours,
       syncNow,
       refreshNodeStatus,
       mergeIntoState
@@ -280,16 +325,20 @@ export function useReports() {
     [
       reports,
       deviceId,
-      syncStatus,
       lastSyncTime,
       backendOnline,
       nodeStatus,
+      demoTimeOffsetHours,
       createLocalReport,
       confirmLocalReport,
       resolveLocalReport,
+      responderVerifyLocalReport,
+      responderRejectLocalReport,
+      addResponderNoteToReport,
       ignoreLocalReport,
       removeDemoReports,
       clearAllReports,
+      setDemoTimeOffsetHours,
       syncNow,
       refreshNodeStatus,
       mergeIntoState

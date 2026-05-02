@@ -1,6 +1,6 @@
 import { Activity, Database, RadioTower, UsersRound } from "lucide-react";
 
-export default function NodeStatusCard({ nodeStatus, backendOnline, lastSyncTime, syncStatus }) {
+export default function NodeStatusCard({ nodeStatus, lastSyncTime }) {
   const status = nodeStatus || {};
 
   return (
@@ -16,7 +16,7 @@ export default function NodeStatusCard({ nodeStatus, backendOnline, lastSyncTime
         <div>
           <Activity size={20} />
           <span>Backend Health</span>
-          <strong>{backendOnline ? status.backend_health || "ok" : "offline"}</strong>
+          <strong>{status.backend_health || "ok"}</strong>
         </div>
         <div>
           <UsersRound size={20} />
@@ -34,7 +34,6 @@ export default function NodeStatusCard({ nodeStatus, backendOnline, lastSyncTime
           <strong>{lastSyncTime ? new Date(lastSyncTime).toLocaleTimeString() : "Not yet"}</strong>
         </div>
       </div>
-      <p className="sync-line">{syncStatus}</p>
     </section>
   );
 }

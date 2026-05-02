@@ -14,7 +14,7 @@ export default function TimelinePage({ reports }) {
       </section>
       <div className="timeline">
         {timeline.map((report) => (
-          <TimelineItem key={report.report_id} report={report} />
+          <TimelineItem key={report.report_id} report={report} allReports={reports} />
         ))}
         {!timeline.length && <p className="empty-state">No timeline entries yet.</p>}
       </div>

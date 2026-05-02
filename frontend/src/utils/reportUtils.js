@@ -1,5 +1,17 @@
 const DUPLICATE_WINDOW_MS = 6 * 60 * 60 * 1000;
 const DUPLICATE_DISTANCE_METERS = 250;
+const NEARBY_MATCH_DISTANCE_METERS = 300;
+const NEARBY_MATCH_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const DEMO_TIME_OFFSET_KEY = "rescuemesh-demo-time-offset-hours";
+
+export function getDemoTimeOffsetHours() {
+  if (typeof localStorage === "undefined") return 0;
+  return Number(localStorage.getItem(DEMO_TIME_OFFSET_KEY) || 0);
+}
+
+export function getDemoNowMs() {
+  return Date.now() + getDemoTimeOffsetHours() * 60 * 60 * 1000;
+}
 
 export function makeReportId(deviceId) {
   return `rm-${deviceId}-${Date.now()}-${crypto.randomUUID()}`;
@@ -29,10 +41,20 @@ export function haversineMeters(a, b) {
 }
 
 export function findPossibleDuplicate(candidate, reports) {
+  return findSimilarNearbyReports(candidate, reports, {
+    distanceMeters: DUPLICATE_DISTANCE_METERS,
+    timeWindowMs: DUPLICATE_WINDOW_MS
+  })[0];
+}
+
+export function findSimilarNearbyReports(candidate, reports, options = {}) {
+  const distanceMeters = options.distanceMeters ?? NEARBY_MATCH_DISTANCE_METERS;
+  const timeWindowMs = options.timeWindowMs ?? NEARBY_MATCH_WINDOW_MS;
   const candidateWords = keywordSet(candidate.title);
   const candidateTime = new Date(candidate.timestamp).getTime();
 
-  return reports.find((report) => {
+  return reports.filter((report) => {
+    if (report.report_id === candidate.report_id) return false;
     if (report.category !== candidate.category) return false;
 
     const reportWords = keywordSet(report.title);
@@ -40,11 +62,65 @@ export function findPossibleDuplicate(candidate, reports) {
     if (sharedWords.length === 0) return false;
 
     const distance = haversineMeters(candidate, report);
-    if (distance > DUPLICATE_DISTANCE_METERS) return false;
+    if (distance > distanceMeters) return false;
 
     const reportTime = new Date(report.timestamp).getTime();
-    return Math.abs(candidateTime - reportTime) <= DUPLICATE_WINDOW_MS;
+    return Math.abs(candidateTime - reportTime) <= timeWindowMs;
   });
+}
+
+export function getFreshness(report) {
+  if (report.agingLabel) {
+    return { label: report.agingLabel, className: `freshness-${report.agingLabel.toLowerCase().replace(" ", "-")}`, ageHours: 0 };
+  }
+  const ageMs = Math.max(0, getDemoNowMs() - new Date(report.timestamp).getTime());
+  const ageHours = ageMs / (60 * 60 * 1000);
+
+  if (ageHours < 1) {
+    return { label: "Fresh", className: "freshness-fresh", ageHours };
+  }
+  if (ageHours < 6) {
+    return { label: "Recent", className: "freshness-recent", ageHours };
+  }
+  if (ageHours < 24) {
+    return { label: "Aging", className: "freshness-aging", ageHours };
+  }
+  return { label: "Stale", className: "freshness-stale", ageHours };
+}
+
+export function calculateConfidence(report, reports = []) {
+  if (typeof report.confidenceScore === "number") return report.confidenceScore;
+  if (report.status === "Resolved") return 0;
+
+  const freshness = getFreshness(report);
+  const nearbyMatches = findSimilarNearbyReports(report, reports);
+  const uniqueNearbyDevices = new Set(nearbyMatches.map((match) => match.device_id)).size;
+  let score = 30;
+
+  score += Math.min(report.confirmation_count || 0, 3) * 20;
+  if (freshness.label === "Aging") score -= 10;
+  if (freshness.label === "Stale") score -= 20;
+  if (nearbyMatches.length > 0) score += 15;
+  if (uniqueNearbyDevices >= 2) score += 10;
+
+  return Math.max(0, Math.min(100, score));
+}
+
+export function getVerificationLabel(report, reports = []) {
+  if (report.status === "Resolved") return "Resolved";
+  if (report.verificationLabel) return report.verificationLabel;
+  const score = calculateConfidence(report, reports);
+  if (score < 30) return "Low Trust";
+  if (score < 60) return "Unverified";
+  if (score < 80) return "Likely Verified";
+  return "Verified";
+}
+
+export function sourceTrustLabel(report) {
+  const trustScore = report.verificationSignals?.deviceTrustScore ?? 70;
+  if (trustScore >= 75) return "Trusted Source";
+  if (trustScore < 40) return "Low Trust Source";
+  return "Normal Source";
 }
 
 export function mergeReport(existing, incoming) {
@@ -60,11 +136,25 @@ export function mergeReport(existing, incoming) {
 }
 
 export function normalizeReport(report) {
+  const verificationSignals = report.verificationSignals || report.verification_signals || {};
   return {
     ...report,
     latitude: Number(report.latitude),
     longitude: Number(report.longitude),
     confirmation_count: report.confirmation_count ?? 0,
+    confirmationCount: report.confirmation_count ?? report.confirmationCount ?? 0,
+    uniqueConfirmationCount: report.unique_confirmation_count ?? report.uniqueConfirmationCount ?? report.confirmation_count ?? 0,
+    confidenceScore: report.confidence_score ?? report.confidenceScore ?? 30,
+    verificationLabel: report.verification_label ?? report.verificationLabel ?? "Unverified",
+    evidenceReasons: report.evidence_reasons ?? report.evidenceReasons ?? [],
+    warningReasons: report.warning_reasons ?? report.warningReasons ?? [],
+    agingLabel: report.aging_label ?? report.agingLabel,
+    verificationSignals,
+    responderVerified: report.responder_verified ?? report.responderVerified ?? false,
+    responderRejected: report.responder_rejected ?? report.responderRejected ?? false,
+    responderNote: report.responder_note ?? report.responderNote ?? "",
+    photoEvidenceAttached: report.photo_evidence_attached ?? report.photoEvidenceAttached ?? false,
+    seenByNodes: report.seen_by_nodes ?? report.seenByNodes ?? [],
     confirmed_by_device_ids: report.confirmed_by_device_ids || [],
     sync_state: report.sync_state || "synced"
   };
@@ -89,11 +179,24 @@ export function toCsv(reports) {
     "longitude",
     "status",
     "timestamp",
-    "device_id",
-    "confirmation_count"
+    "confirmation_count",
+    "confidenceScore",
+    "verificationLabel",
+    "evidenceReasons",
+    "warningReasons",
+    "agingLabel",
+    "uniqueConfirmationCount",
+    "responderVerified",
+    "responderRejected",
+    "responderNote",
+    "seenByNodes",
+    "sourceTrustLabel"
   ];
-  const escape = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
-  return [columns.join(","), ...reports.map((report) => columns.map((column) => escape(report[column])).join(","))].join("\n");
+  const escape = (value) => `"${String(Array.isArray(value) ? value.join("; ") : value ?? "").replaceAll('"', '""')}"`;
+  return [
+    columns.join(","),
+    ...reports.map((report) => columns.map((column) => escape(column === "sourceTrustLabel" ? sourceTrustLabel(report) : report[column])).join(","))
+  ].join("\n");
 }
 
 export function downloadFile(filename, content, type) {

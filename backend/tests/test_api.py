@@ -31,6 +31,10 @@ def sample_report(report_id: str = "local-report-1") -> dict:
     }
 
 
+def report_with(report_id: str, **overrides) -> dict:
+    return {**sample_report(report_id), **overrides}
+
+
 def test_report_creation(client: TestClient) -> None:
     response = client.post("/reports", json=sample_report())
     assert response.status_code == 201
@@ -120,3 +124,149 @@ def test_public_mode_requires_admin_token_for_delete(client: TestClient, monkeyp
     assert blocked.status_code == 403
     assert allowed.status_code == 200
     assert allowed.json()["deleted_count"] == 1
+
+
+def test_inside_emergency_zone_increases_confidence(client: TestClient) -> None:
+    response = client.post("/reports", json=report_with("inside-zone-1", timestamp="2099-01-01T12:00:00Z"))
+
+    assert response.json()["verification_signals"]["insideEmergencyZone"] is True
+    assert "Report is inside the configured emergency area." in response.json()["evidence_reasons"]
+
+
+def test_outside_emergency_zone_lowers_confidence(client: TestClient) -> None:
+    response = client.post("/reports", json=report_with("outside-zone-1", latitude=41.0, longitude=-75.0))
+
+    assert response.json()["verification_signals"]["insideEmergencyZone"] is False
+    assert "Report is outside the configured emergency area." in response.json()["warning_reasons"]
+    assert response.json()["confidence_score"] <= 30
+
+
+def test_stale_report_lowers_confidence(client: TestClient) -> None:
+    response = client.post("/reports", json=report_with("stale-report-1", timestamp="2020-01-01T00:00:00Z"))
+
+    assert response.json()["aging_label"] == "Stale"
+    assert "This report is old. Verify before relying on it." in response.json()["warning_reasons"]
+
+
+def test_similar_nearby_reports_increase_confidence(client: TestClient) -> None:
+    client.post("/reports", json=report_with("similar-1", title="Water at library", timestamp="2099-01-01T12:00:00Z"))
+    response = client.post(
+        "/reports",
+        json=report_with("similar-2", title="Water available library", device_id="device-beta", timestamp="2099-01-01T12:03:00Z"),
+    )
+
+    assert response.json()["verification_signals"]["hasSimilarNearbyReports"] is True
+    assert response.json()["verification_signals"]["similarReportCount"] >= 1
+
+
+def test_same_device_cannot_confirm_twice(client: TestClient) -> None:
+    client.post("/reports", json=sample_report())
+
+    client.post("/reports/local-report-1/confirm", json={"device_id": "device-beta"})
+    repeated = client.post("/reports/local-report-1/confirm", json={"device_id": "device-beta"})
+
+    assert repeated.json()["unique_confirmation_count"] == 1
+
+
+def test_two_unique_confirmations_can_confirm_report(client: TestClient) -> None:
+    client.post("/reports", json=sample_report())
+
+    client.post("/reports/local-report-1/confirm", json={"device_id": "device-beta"})
+    response = client.post("/reports/local-report-1/confirm", json={"device_id": "device-gamma"})
+
+    assert response.json()["status"] == "Confirmed"
+
+
+def test_responder_verification_increases_confidence(client: TestClient) -> None:
+    client.post("/reports", json=report_with("responder-verify-1", timestamp="2099-01-01T12:00:00Z"))
+
+    response = client.post("/reports/responder-verify-1/responder-verify")
+
+    assert response.json()["responder_verified"] is True
+    assert response.json()["confidence_score"] >= 60
+
+
+def test_responder_rejection_forces_low_trust(client: TestClient) -> None:
+    client.post("/reports", json=sample_report())
+
+    response = client.post("/reports/local-report-1/responder-reject")
+
+    assert response.json()["responder_rejected"] is True
+    assert response.json()["verification_label"] == "Low Trust"
+
+
+def test_suspicious_device_activity_lowers_confidence(client: TestClient) -> None:
+    for index in range(6):
+        client.post(
+            "/reports",
+            json=report_with(
+                f"suspicious-{index}",
+                title=f"Critical danger report {index}",
+                urgency="Critical",
+                timestamp=f"2099-01-01T12:00:0{index}Z",
+                device_id="device-spam",
+            ),
+        )
+
+    response = client.get("/reports").json()[0]
+
+    assert response["verification_signals"]["suspiciousDeviceActivity"] is True
+    assert response["status"] == "Needs Review"
+
+
+def test_confidence_score_is_clamped(client: TestClient) -> None:
+    response = client.post(
+        "/reports",
+        json=report_with("clamped-1", timestamp="2099-01-01T12:00:00Z", photo_evidence_attached=True),
+    )
+    client.post("/reports/clamped-1/responder-verify")
+    client.post("/reports/clamped-1/confirm", json={"device_id": "device-beta"})
+    client.post("/reports/clamped-1/confirm", json={"device_id": "device-gamma"})
+    client.post("/reports/clamped-1/confirm", json={"device_id": "device-delta"})
+    response = client.get("/reports").json()[0]
+
+    assert 0 <= response["confidence_score"] <= 100
+
+
+def test_resolved_status_overrides_verification_changes(client: TestClient) -> None:
+    client.post("/reports", json=sample_report())
+    client.post("/reports/local-report-1/resolve")
+
+    response = client.post("/reports/local-report-1/responder-reject")
+
+    assert response.json()["status"] == "Resolved"
+
+
+def test_incident_guidance_uses_local_fallback_without_google_key(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GOOGLE_AI_API_KEY", raising=False)
+
+    response = client.post(
+        "/ai/incident-guidance",
+        json={
+            "title": "Road blocked near main entrance",
+            "category": "Blocked Road",
+            "description": "Large tree and debris across the entrance road.",
+            "urgency": "High",
+            "status": "Unverified",
+            "aging_label": "Fresh",
+            "verification_label": "Unverified",
+            "confidence_score": 45,
+        },
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["source"] == "local-fallback"
+    assert body["should_do"] == []
+    assert body["avoid"] == []
+    assert body["safety_note"] == "Gemini guidance is unavailable right now."
+
+
+def test_ai_status_reports_google_ai_configuration(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GOOGLE_AI_API_KEY", "test-key")
+    monkeypatch.setenv("GOOGLE_AI_MODEL", "gemini-2.5-flash-lite")
+
+    response = client.get("/ai/status")
+
+    assert response.status_code == 200
+    assert response.json() == {"googleAiConfigured": True, "model": "gemini-2.5-flash-lite"}

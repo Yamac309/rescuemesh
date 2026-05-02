@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { LocateFixed } from "lucide-react";
 import { CATEGORIES, STATUSES, URGENCY_LEVELS } from "../utils/constants";
-import { makeReportId } from "../utils/reportUtils";
+import { findPossibleDuplicate, makeReportId } from "../utils/reportUtils";
 
 const initialForm = {
   title: "",
@@ -10,10 +10,11 @@ const initialForm = {
   urgency: "Medium",
   latitude: "",
   longitude: "",
-  status: "Unverified"
+  status: "Unverified",
+  photoEvidenceAttached: false
 };
 
-export default function ReportForm({ deviceId, onSubmit }) {
+export default function ReportForm({ deviceId, reports = [], onSubmit }) {
   const [form, setForm] = useState(initialForm);
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState("info");
@@ -72,10 +73,23 @@ export default function ReportForm({ deviceId, onSubmit }) {
       status: form.status,
       timestamp: new Date().toISOString(),
       device_id: deviceId,
+      photo_evidence_attached: form.photoEvidenceAttached,
       confirmation_count: 0,
       confirmed_by_device_ids: [],
       sync_state: "pending"
     };
+
+    const possibleDuplicate = findPossibleDuplicate(report, reports);
+    if (possibleDuplicate) {
+      const shouldContinue = window.confirm(
+        `This looks similar to another report: "${possibleDuplicate.title}". Are you sure you want to create a new report?`
+      );
+      if (!shouldContinue) {
+        setMessageTone("info");
+        setMessage("Report was not saved. You can update the details or confirm the existing report instead.");
+        return;
+      }
+    }
 
     const duplicate = await onSubmit(report);
     setForm(initialForm);
@@ -144,6 +158,15 @@ export default function ReportForm({ deviceId, onSubmit }) {
         </button>
       </div>
       <p className="field-help">Coordinates are the incident location. Use the location button only when the report is about where this device is right now.</p>
+      <label className="checkbox-row">
+        <input
+          type="checkbox"
+          checked={form.photoEvidenceAttached}
+          onChange={(event) => updateField("photoEvidenceAttached", event.target.checked)}
+        />
+        Photo evidence attached
+      </label>
+      <p className="field-help">MVP note: this stores a yes/no evidence flag. TODO: add real image upload, metadata checks, and privacy review.</p>
       <button type="submit" className="primary">
         Save Emergency Report
       </button>

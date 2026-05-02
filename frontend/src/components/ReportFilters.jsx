@@ -40,6 +40,54 @@ export default function ReportFilters({ filters, onChange }) {
           ))}
         </select>
       </label>
+      <label>
+        Verification
+        <select value={filters.verification} onChange={(event) => updateFilter("verification", event.target.value)}>
+          <option value="All">All verification</option>
+          {["Low Trust", "Unverified", "Likely Verified", "Verified"].map((label) => (
+            <option key={label} value={label}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Confidence
+        <select value={filters.confidence} onChange={(event) => updateFilter("confidence", event.target.value)}>
+          <option value="All">Any confidence</option>
+          <option value="0-29">0-29%</option>
+          <option value="30-59">30-59%</option>
+          <option value="60-79">60-79%</option>
+          <option value="80-100">80-100%</option>
+        </select>
+      </label>
+      <label>
+        Age
+        <select value={filters.aging} onChange={(event) => updateFilter("aging", event.target.value)}>
+          <option value="All">Any age</option>
+          {["Fresh", "Recent", "Aging", "Stale"].map((label) => (
+            <option key={label} value={label}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="checkbox-row">
+        <input type="checkbox" checked={filters.needsReview} onChange={(event) => updateFilter("needsReview", event.target.checked)} />
+        Needs Review
+      </label>
+      <label className="checkbox-row">
+        <input type="checkbox" checked={filters.suspicious} onChange={(event) => updateFilter("suspicious", event.target.checked)} />
+        Suspicious
+      </label>
+      <label className="checkbox-row">
+        <input type="checkbox" checked={filters.responderVerified} onChange={(event) => updateFilter("responderVerified", event.target.checked)} />
+        Responder Verified
+      </label>
+      <label className="checkbox-row">
+        <input type="checkbox" checked={filters.stale} onChange={(event) => updateFilter("stale", event.target.checked)} />
+        Stale
+      </label>
     </div>
   );
 }

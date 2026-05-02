@@ -65,6 +65,52 @@ export function resolveReport(reportId) {
   });
 }
 
+export function responderVerifyReport(reportId) {
+  return request(`/reports/${encodeURIComponent(reportId)}/responder-verify`, {
+    method: "POST"
+  });
+}
+
+export function responderRejectReport(reportId) {
+  return request(`/reports/${encodeURIComponent(reportId)}/responder-reject`, {
+    method: "POST"
+  });
+}
+
+export function addResponderNote(reportId, note) {
+  return request(`/reports/${encodeURIComponent(reportId)}/responder-note`, {
+    method: "POST",
+    body: JSON.stringify({ note })
+  });
+}
+
+export function getNeedsReviewReports() {
+  return request("/reports/needs-review");
+}
+
+export function getVerificationConfig() {
+  return request("/verification/config");
+}
+
+export function getIncidentGuidance(report) {
+  return request("/ai/incident-guidance", {
+    method: "POST",
+    body: JSON.stringify({
+      title: report.title,
+      category: report.category,
+      description: report.description || "",
+      urgency: report.urgency,
+      status: report.status,
+      timestamp: report.timestamp,
+      latitude: report.latitude,
+      longitude: report.longitude,
+      confidence_score: report.confidenceScore,
+      verification_label: report.verificationLabel,
+      aging_label: report.agingLabel
+    })
+  });
+}
+
 export function deleteDemoReports() {
   return request("/demo/reports", {
     method: "DELETE"

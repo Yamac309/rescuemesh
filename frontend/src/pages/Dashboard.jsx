@@ -1,8 +1,8 @@
-import { Download, RefreshCw, Siren, Trash2 } from "lucide-react";
+import { Download, Siren, Trash2 } from "lucide-react";
 import NodeStatusCard from "../components/NodeStatusCard";
 import ReportCard from "../components/ReportCard";
 import { makeDemoReports } from "../utils/demoData";
-import { downloadFile, toCsv } from "../utils/reportUtils";
+import { downloadFile, sourceTrustLabel, toCsv } from "../utils/reportUtils";
 
 export default function Dashboard({ mesh }) {
   const highPriority = mesh.reports.filter((report) => ["High", "Critical"].includes(report.urgency) && report.status !== "Resolved");
@@ -17,7 +17,12 @@ export default function Dashboard({ mesh }) {
   }
 
   function exportJson() {
-    downloadFile("rescuemesh-incident-log.json", JSON.stringify(mesh.reports, null, 2), "application/json");
+    const safeReports = mesh.reports.map(({ device_id, deviceId, ...report }) => ({
+      ...report,
+      anonymousDevice: "hidden",
+      sourceTrustLabel: sourceTrustLabel(report)
+    }));
+    downloadFile("rescuemesh-incident-log.json", JSON.stringify(safeReports, null, 2), "application/json");
   }
 
   function exportCsv() {
@@ -35,16 +40,13 @@ export default function Dashboard({ mesh }) {
     <div className="page-grid">
       <section className="hero-band">
         <div>
-          <p className="eyebrow">Offline-first emergency coordination</p>
+          <p className="eyebrow">Online emergency coordination</p>
           <h1>RescueMesh</h1>
           <p>
-            Create incident reports on this device, keep working without internet, and sync with any local RescueMesh Node available on the same Wi-Fi/LAN.
+            Create incident reports, verify information with multiple signals, and share updates through the active RescueMesh response node.
           </p>
         </div>
         <div className="hero-actions">
-          <button className="primary" onClick={mesh.syncNow}>
-            <RefreshCw size={18} /> Sync Now
-          </button>
           {showDevelopmentActions && (
             <>
               <button className="secondary" onClick={seedDemoData}>
@@ -56,6 +58,22 @@ export default function Dashboard({ mesh }) {
               <button className="secondary danger" onClick={clearAllReports} disabled={!mesh.reports.length}>
                 <Trash2 size={18} /> Clear All Reports
               </button>
+              <div className="demo-time-control">
+                <label>
+                  Demo Time: +{mesh.demoTimeOffsetHours}h
+                  <input
+                    type="range"
+                    min="0"
+                    max="72"
+                    step="1"
+                    value={mesh.demoTimeOffsetHours}
+                    onChange={(event) => mesh.setDemoTimeOffsetHours(event.target.value)}
+                  />
+                </label>
+                <button className="secondary" onClick={() => mesh.setDemoTimeOffsetHours(0)} disabled={mesh.demoTimeOffsetHours === 0}>
+                  Reset Time
+                </button>
+              </div>
             </>
           )}
         </div>
@@ -76,7 +94,7 @@ export default function Dashboard({ mesh }) {
         </div>
         <div className="stat">
           <span>Node</span>
-          <strong>{mesh.backendOnline ? "Online" : "Offline"}</strong>
+          <strong>Online</strong>
         </div>
       </div>
 
@@ -106,6 +124,7 @@ export default function Dashboard({ mesh }) {
             onConfirm={mesh.confirmLocalReport}
             onResolve={mesh.resolveLocalReport}
             onIgnore={mesh.ignoreLocalReport}
+            allReports={mesh.reports}
           />
         ))}
         {!mesh.reports.length && <p className="empty-state">No reports yet. Create one or load demo data to test sync.</p>}

@@ -11,7 +11,7 @@ export const CATEGORIES = [
 ];
 
 export const URGENCY_LEVELS = ["Low", "Medium", "High", "Critical"];
-export const STATUSES = ["Unverified", "Confirmed", "Resolved"];
+export const STATUSES = ["Unverified", "Confirmed", "Needs Review", "Resolved"];
 
 export const WORLD_CENTER = [20, 0];
 
