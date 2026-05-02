@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { confirmReport, createSocket, deleteAllReports, deleteDemoReports, getHealth, getNodeStatus, resolveReport, syncReports } from "../api/client";
 import {
+  clearIgnoredReports,
   deleteAllReports as deleteAllLocalReports,
+  deleteIgnoredReportIds,
   deleteQueuedAction,
   deleteReportsByIds,
   deleteReportsByTitles,
   getAllReports,
   getDeviceId,
+  getIgnoredReportIds,
   getQueuedActions,
+  ignoreReport,
   queueAction,
   saveReport,
   saveReports
@@ -22,6 +26,15 @@ export function useReports() {
   const [lastSyncTime, setLastSyncTime] = useState(null);
   const [backendOnline, setBackendOnline] = useState(false);
   const [nodeStatus, setNodeStatus] = useState(null);
+  const [ignoredReportIds, setIgnoredReportIds] = useState([]);
+
+  const visibleReports = useCallback(
+    (candidateReports, ignoredIds = ignoredReportIds) => {
+      const ignored = new Set(ignoredIds);
+      return sortByNewest(candidateReports.filter((report) => !ignored.has(report.report_id)));
+    },
+    [ignoredReportIds]
+  );
 
   const mergeIntoState = useCallback(async (incomingReports) => {
     setReports((currentReports) => {
@@ -30,26 +43,29 @@ export function useReports() {
         const normalized = normalizeReport(incoming);
         byId.set(normalized.report_id, mergeReport(byId.get(normalized.report_id), normalized));
       });
-      const merged = sortByNewest([...byId.values()]);
-      saveReports(merged).catch((error) => console.error("Unable to save reports locally", error));
-      return merged;
+      const merged = [...byId.values()];
+      saveReports(incomingReports).catch((error) => console.error("Unable to save reports locally", error));
+      return visibleReports(merged);
     });
-  }, []);
+  }, [visibleReports]);
 
   const removeFromState = useCallback(async (reportIds) => {
     if (!reportIds.length) return;
     await deleteReportsByIds(reportIds);
+    await deleteIgnoredReportIds(reportIds);
+    setIgnoredReportIds((currentIds) => currentIds.filter((reportId) => !reportIds.includes(reportId)));
     setReports((currentReports) => currentReports.filter((report) => !reportIds.includes(report.report_id)));
   }, []);
 
   useEffect(() => {
-    getAllReports()
-      .then((localReports) => {
-        setReports(sortByNewest(localReports));
+    Promise.all([getAllReports(), getIgnoredReportIds()])
+      .then(([localReports, ignoredIds]) => {
+        setIgnoredReportIds(ignoredIds);
+        setReports(visibleReports(localReports, ignoredIds));
         setSyncStatus(localReports.length ? "Loaded from this device" : "Ready for reports");
       })
       .catch(() => setSyncStatus("Unable to read local storage"));
-  }, []);
+  }, [visibleReports]);
 
   const refreshNodeStatus = useCallback(async () => {
     try {
@@ -191,12 +207,22 @@ export function useReports() {
 
       try {
         const updated = await resolveReport(reportId);
-        await mergeIntoState([updated]);
-      } catch {
-        await queueAction({ type: "resolve", report_id: reportId });
-      }
-    },
+      await mergeIntoState([updated]);
+    } catch {
+      await queueAction({ type: "resolve", report_id: reportId });
+    }
+  },
     [mergeIntoState, reports]
+  );
+
+  const ignoreLocalReport = useCallback(
+    async (reportId) => {
+      await ignoreReport(reportId);
+      setIgnoredReportIds((currentIds) => (currentIds.includes(reportId) ? currentIds : [...currentIds, reportId]));
+      setReports((currentReports) => currentReports.filter((report) => report.report_id !== reportId));
+      setSyncStatus("Report ignored on this device only");
+    },
+    []
   );
 
   const removeDemoReports = useCallback(async () => {
@@ -219,11 +245,15 @@ export function useReports() {
     try {
       const response = await deleteAllReports();
       await deleteAllLocalReports();
+      await clearIgnoredReports();
+      setIgnoredReportIds([]);
       setReports([]);
       await refreshNodeStatus();
       setSyncStatus(`Cleared ${Math.max(localReportIds.length, response.deleted_count || 0)} reports`);
     } catch {
       await deleteAllLocalReports();
+      await clearIgnoredReports();
+      setIgnoredReportIds([]);
       setReports([]);
       setSyncStatus(`Cleared ${localReportIds.length} local reports. Node cleanup will need a connection.`);
     }
@@ -240,6 +270,7 @@ export function useReports() {
       createLocalReport,
       confirmLocalReport,
       resolveLocalReport,
+      ignoreLocalReport,
       removeDemoReports,
       clearAllReports,
       syncNow,
@@ -256,6 +287,7 @@ export function useReports() {
       createLocalReport,
       confirmLocalReport,
       resolveLocalReport,
+      ignoreLocalReport,
       removeDemoReports,
       clearAllReports,
       syncNow,

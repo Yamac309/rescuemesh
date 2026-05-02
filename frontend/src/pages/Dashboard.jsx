@@ -99,7 +99,14 @@ export default function Dashboard({ mesh }) {
 
       <div className="report-grid">
         {mesh.reports.slice(0, 6).map((report) => (
-          <ReportCard key={report.report_id} report={report} deviceId={mesh.deviceId} onConfirm={mesh.confirmLocalReport} onResolve={mesh.resolveLocalReport} />
+          <ReportCard
+            key={report.report_id}
+            report={report}
+            deviceId={mesh.deviceId}
+            onConfirm={mesh.confirmLocalReport}
+            onResolve={mesh.resolveLocalReport}
+            onIgnore={mesh.ignoreLocalReport}
+          />
         ))}
         {!mesh.reports.length && <p className="empty-state">No reports yet. Create one or load demo data to test sync.</p>}
       </div>

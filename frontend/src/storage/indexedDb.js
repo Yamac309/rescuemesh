@@ -1,9 +1,10 @@
 import { normalizeReport } from "../utils/reportUtils";
 
 const DB_NAME = "rescuemesh-db";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const REPORT_STORE = "reports";
 const ACTION_STORE = "queuedActions";
+const IGNORED_REPORT_STORE = "ignoredReports";
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -18,6 +19,9 @@ function openDatabase() {
       }
       if (!db.objectStoreNames.contains(ACTION_STORE)) {
         db.createObjectStore(ACTION_STORE, { keyPath: "id", autoIncrement: true });
+      }
+      if (!db.objectStoreNames.contains(IGNORED_REPORT_STORE)) {
+        db.createObjectStore(IGNORED_REPORT_STORE, { keyPath: "report_id" });
       }
     };
 
@@ -68,6 +72,50 @@ export async function deleteReportsByIds(reportIds) {
       resolve();
     };
     transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+export async function ignoreReport(reportId) {
+  const { db, transaction, store } = await storeTransaction(IGNORED_REPORT_STORE, "readwrite");
+  return new Promise((resolve, reject) => {
+    const request = store.put({ report_id: reportId, ignored_at: new Date().toISOString() });
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => db.close();
+  });
+}
+
+export async function getIgnoredReportIds() {
+  const { db, store } = await storeTransaction(IGNORED_REPORT_STORE);
+  return new Promise((resolve, reject) => {
+    const request = store.getAll();
+    request.onsuccess = () => {
+      db.close();
+      resolve(request.result.map((item) => item.report_id));
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function deleteIgnoredReportIds(reportIds) {
+  const { db, transaction, store } = await storeTransaction(IGNORED_REPORT_STORE, "readwrite");
+  return new Promise((resolve, reject) => {
+    reportIds.forEach((reportId) => store.delete(reportId));
+    transaction.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+export async function clearIgnoredReports() {
+  const { db, transaction, store } = await storeTransaction(IGNORED_REPORT_STORE, "readwrite");
+  return new Promise((resolve, reject) => {
+    const request = store.clear();
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => db.close();
   });
 }
 

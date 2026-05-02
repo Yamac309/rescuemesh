@@ -36,6 +36,7 @@ export default function MapPage({ mesh }) {
               deviceId={mesh.deviceId}
               onConfirm={mesh.confirmLocalReport}
               onResolve={mesh.resolveLocalReport}
+              onIgnore={mesh.ignoreLocalReport}
               compact
             />
           ))}

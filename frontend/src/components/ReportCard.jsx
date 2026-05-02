@@ -1,8 +1,17 @@
-import { CheckCircle2, MapPin, ShieldCheck } from "lucide-react";
+import { CheckCircle2, EyeOff, MapPin, ShieldCheck } from "lucide-react";
 import { URGENCY_CLASS } from "../utils/constants";
 
-export default function ReportCard({ report, deviceId, onConfirm, onResolve, compact = false }) {
+export default function ReportCard({ report, deviceId, onConfirm, onResolve, onIgnore, compact = false }) {
   const alreadyConfirmed = report.confirmed_by_device_ids?.includes(deviceId);
+
+  function confirmIgnore() {
+    const shouldIgnore = window.confirm(
+      "Ignore this report on your device only? It will be hidden from your view, but other users will still be able to see it."
+    );
+    if (shouldIgnore) {
+      onIgnore(report.report_id);
+    }
+  }
 
   return (
     <article className={`report-card ${compact ? "compact" : ""}`}>
@@ -33,6 +42,11 @@ export default function ReportCard({ report, deviceId, onConfirm, onResolve, com
         <button className="secondary danger" onClick={() => onResolve(report.report_id)} disabled={report.status === "Resolved"}>
           Mark Resolved
         </button>
+        {onIgnore && (
+          <button className="secondary" onClick={confirmIgnore}>
+            <EyeOff size={16} /> Ignore
+          </button>
+        )}
       </div>
     </article>
   );
