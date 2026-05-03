@@ -345,10 +345,22 @@ def insert_report(report: ReportCreate) -> tuple[bool, dict]:
     return True, get_report(report.report_id)
 
 
-def get_deleted_report_ids() -> list[str]:
+def get_deleted_report_ids(known_report_ids: list[str] | None = None) -> list[str]:
+    if not known_report_ids:
+        return []
+
+    unique_report_ids = list(dict.fromkeys(known_report_ids))
+    deleted_report_ids: list[str] = []
     with get_connection() as db:
-        rows = db.execute("SELECT report_id FROM deleted_reports").fetchall()
-        return [row["report_id"] for row in rows]
+        for index in range(0, len(unique_report_ids), 500):
+            chunk = unique_report_ids[index:index + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = db.execute(
+                f"SELECT report_id FROM deleted_reports WHERE report_id IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            deleted_report_ids.extend(row["report_id"] for row in rows)
+    return deleted_report_ids
 
 
 def remember_deleted_report_ids(report_ids: list[str]) -> None:

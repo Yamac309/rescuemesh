@@ -177,6 +177,18 @@ def test_delete_demo_reports_tombstones_requested_local_ids(client: TestClient) 
     assert sync_response.json()["total_reports"] == 0
 
 
+def test_sync_only_returns_deleted_ids_known_by_client(client: TestClient) -> None:
+    client.request("DELETE", "/demo/reports", json={"report_ids": ["known-deleted-report", "unknown-deleted-report"]})
+
+    response = client.post(
+        "/sync",
+        json={"known_report_ids": ["known-deleted-report"], "reports": []},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["deleted_report_ids"] == ["known-deleted-report"]
+
+
 def test_delete_all_reports(client: TestClient) -> None:
     client.post("/reports", json=sample_report())
     client.post("/reports", json=sample_report("second-report-1"))

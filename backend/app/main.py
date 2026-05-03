@@ -139,7 +139,7 @@ async def sync_reports(payload: SyncRequest) -> dict:
             duplicate_report_ids.append(report.report_id)
 
     missing_reports = database.get_reports_missing_from_client(payload.known_report_ids)
-    deleted_report_ids = database.get_deleted_report_ids()
+    deleted_report_ids = database.get_deleted_report_ids(payload.known_report_ids)
     database.set_meta("last_sync_time", utc_now())
 
     for report in accepted_reports:

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { Crosshair, Layers, LocateFixed, MapPinned, Satellite } from "lucide-react";
 import { CATEGORY_MARKERS, URGENCY_CLASS, WORLD_CENTER } from "../utils/constants";
 import { calculateConfidence, getFreshness, getVerificationLabel } from "../utils/reportUtils";
@@ -74,18 +75,48 @@ function mapKitType(mapkit, mode) {
   return types.Hybrid || types.Satellite || types.Standard;
 }
 
+function escapeHtml(value = "") {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function reportWithValidCoordinates(report) {
+  const latitude = Number(report.latitude);
+  const longitude = Number(report.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+  return { ...report, latitude, longitude };
+}
+
+function markerClassName(report, verificationLabel, freshness) {
+  const markerLabel = verificationLabel.toLowerCase().replaceAll(" ", "-");
+  return [
+    "mesh-marker",
+    URGENCY_CLASS[report.urgency],
+    `marker-${markerLabel}`,
+    report.status === "Resolved" ? "marker-resolved" : "",
+    freshness.label === "Stale" ? "marker-stale" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 function popupHtml(report, verificationLabel, freshness, confidence) {
   return `
     <div class="map-popup">
-      <strong>${report.title}</strong>
-      ${report.locationName ? `<span>${report.locationName}</span>` : ""}
-      ${report.locationAddress ? `<small>${report.locationAddress}</small>` : ""}
-      ${report.description ? `<p>${report.description}</p>` : ""}
+      <strong>${escapeHtml(report.title)}</strong>
+      ${report.locationName ? `<span>${escapeHtml(report.locationName)}</span>` : ""}
+      ${report.locationAddress ? `<small>${escapeHtml(report.locationAddress)}</small>` : ""}
+      ${report.description ? `<p>${escapeHtml(report.description)}</p>` : ""}
       <dl>
-        <dt>Urgency</dt><dd>${report.urgency}</dd>
-        <dt>Status</dt><dd>${report.status}</dd>
-        <dt>Verification</dt><dd>${verificationLabel}</dd>
-        <dt>Freshness</dt><dd>${freshness.label}</dd>
+        <dt>Urgency</dt><dd>${escapeHtml(report.urgency)}</dd>
+        <dt>Status</dt><dd>${escapeHtml(report.status)}</dd>
+        <dt>Verification</dt><dd>${escapeHtml(verificationLabel)}</dd>
+        <dt>Freshness</dt><dd>${escapeHtml(freshness.label)}</dd>
         <dt>Confidence</dt><dd>${confidence}%</dd>
       </dl>
     </div>
@@ -102,21 +133,85 @@ export default function ReportMap({ reports, allReports = reports }) {
   const userMarkerRef = useRef(null);
   const fitTimersRef = useRef([]);
   const resizeObserverRef = useRef(null);
+  const resizeFrameRef = useRef(null);
+  const userInteractedRef = useRef(false);
+  const programmaticMoveRef = useRef(false);
+  const programmaticMoveTimerRef = useRef(null);
   const [locationMessage, setLocationMessage] = useState("");
   const [locationTone, setLocationTone] = useState("info");
   const [mapMode, setMapMode] = useState("satellite");
   const [mapProvider, setMapProvider] = useState(APPLE_MAPS_ENABLED ? "Loading Apple Maps" : "Satellite");
+  const [mapReadyVersion, setMapReadyVersion] = useState(0);
 
-  const center = useMemo(() => {
-    if (!reports.length) return WORLD_CENTER;
-    return [reports[0].latitude, reports[0].longitude];
-  }, [reports]);
-
-  const openReportCount = reports.filter((report) => report.status !== "Resolved").length;
-  const criticalCount = reports.filter((report) => report.urgency === "Critical" && report.status !== "Resolved").length;
+  const validReports = useMemo(() => reports.map(reportWithValidCoordinates).filter(Boolean), [reports]);
+  const validAllReports = useMemo(() => allReports.map(reportWithValidCoordinates).filter(Boolean), [allReports]);
+  const openReportCount = validReports.filter((report) => report.status !== "Resolved").length;
+  const criticalCount = validReports.filter((report) => report.urgency === "Critical" && report.status !== "Resolved").length;
   const reportsKey = useMemo(
-    () => reports.map((report) => `${report.report_id}:${report.latitude}:${report.longitude}`).join("|"),
-    [reports]
+    () => validReports.map((report) => `${report.report_id}:${report.latitude}:${report.longitude}`).join("|"),
+    [validReports]
+  );
+
+  const invalidateMapSize = useCallback(() => {
+    if (engineRef.current !== "leaflet" || !mapRef.current) return;
+    if (resizeFrameRef.current) window.cancelAnimationFrame(resizeFrameRef.current);
+    resizeFrameRef.current = window.requestAnimationFrame(() => {
+      resizeFrameRef.current = null;
+      mapRef.current?.invalidateSize({ debounceMoveend: true });
+    });
+  }, []);
+
+  const finishProgrammaticMoveSoon = useCallback(() => {
+    if (programmaticMoveTimerRef.current) {
+      window.clearTimeout(programmaticMoveTimerRef.current);
+    }
+    programmaticMoveTimerRef.current = window.setTimeout(() => {
+      programmaticMoveRef.current = false;
+      programmaticMoveTimerRef.current = null;
+    }, 250);
+  }, []);
+
+  const fitReports = useCallback(
+    ({ animate = false, force = false } = {}) => {
+      if (!mapRef.current) return;
+      if (!force && userInteractedRef.current) return;
+
+      programmaticMoveRef.current = true;
+      if (!validReports.length) {
+        if (engineRef.current === "leaflet") {
+          invalidateMapSize();
+          mapRef.current.setView(WORLD_CENTER, 2, { animate });
+        }
+        if (engineRef.current === "mapkit" && window.mapkit) {
+          const coordinate = new window.mapkit.Coordinate(WORLD_CENTER[0], WORLD_CENTER[1]);
+          mapRef.current.setCenterAnimated(coordinate, animate);
+        }
+        finishProgrammaticMoveSoon();
+        return;
+      }
+
+      if (engineRef.current === "mapkit" && mapKitAnnotationsRef.current.length) {
+        mapRef.current.showItems(mapKitAnnotationsRef.current, { animate });
+        finishProgrammaticMoveSoon();
+        return;
+      }
+
+      if (engineRef.current !== "leaflet") {
+        finishProgrammaticMoveSoon();
+        return;
+      }
+
+      const points = validReports.map((report) => [report.latitude, report.longitude]);
+      const uniquePoints = new Set(points.map((point) => point.join(",")));
+      invalidateMapSize();
+      if (uniquePoints.size === 1) {
+        mapRef.current.setView(points[0], 16, { animate });
+      } else {
+        mapRef.current.fitBounds(L.latLngBounds(points), { padding: [42, 42], maxZoom: 16, animate });
+      }
+      finishProgrammaticMoveSoon();
+    },
+    [finishProgrammaticMoveSoon, invalidateMapSize, validReports]
   );
 
   useEffect(() => {
@@ -130,23 +225,31 @@ export default function ReportMap({ reports, allReports = reports }) {
 
       const map = L.map(containerRef.current, {
         zoomControl: false,
-        preferCanvas: true
-      }).setView(center, reports.length ? 15 : 2);
+        preferCanvas: true,
+        worldCopyJump: true
+      }).setView(WORLD_CENTER, 2);
+
+      map.on("dragstart zoomstart", () => {
+        if (!programmaticMoveRef.current) userInteractedRef.current = true;
+      });
+
       mapRef.current = map;
       L.control.zoom({ position: "bottomright" }).addTo(map);
       markerLayerRef.current = L.layerGroup().addTo(map);
       tileLayerRef.current = L.tileLayer(LEAFLET_TILES[mapMode].url, {
         maxZoom: 19,
-        attribution: LEAFLET_TILES[mapMode].attribution
+        attribution: LEAFLET_TILES[mapMode].attribution,
+        updateWhenIdle: true,
+        keepBuffer: 2
       }).addTo(map);
+
       if (window.ResizeObserver) {
-        resizeObserverRef.current = new ResizeObserver(() => {
-          map.invalidateSize();
-        });
+        resizeObserverRef.current = new ResizeObserver(invalidateMapSize);
         resizeObserverRef.current.observe(containerRef.current);
       }
-      window.requestAnimationFrame(() => map.invalidateSize());
-      window.setTimeout(() => fitReports(), 0);
+
+      setMapReadyVersion((version) => version + 1);
+      invalidateMapSize();
     }
 
     if (APPLE_MAPS_ENABLED) {
@@ -164,10 +267,7 @@ export default function ReportMap({ reports, allReports = reports }) {
           });
           map.mapType = mapKitType(mapkit, mapMode);
           mapRef.current = map;
-          if (reports.length) {
-            map.center = new mapkit.Coordinate(center[0], center[1]);
-          }
-          window.setTimeout(() => fitReports(), 0);
+          setMapReadyVersion((version) => version + 1);
         })
         .catch(() => {
           setLocationTone("warning");
@@ -180,6 +280,14 @@ export default function ReportMap({ reports, allReports = reports }) {
 
     return () => {
       canceled = true;
+      fitTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      fitTimersRef.current = [];
+      if (resizeFrameRef.current) window.cancelAnimationFrame(resizeFrameRef.current);
+      if (programmaticMoveTimerRef.current) window.clearTimeout(programmaticMoveTimerRef.current);
+      resizeFrameRef.current = null;
+      programmaticMoveTimerRef.current = null;
+      resizeObserverRef.current?.disconnect();
+      resizeObserverRef.current = null;
       if (engineRef.current === "leaflet") {
         mapRef.current?.remove();
       }
@@ -187,19 +295,16 @@ export default function ReportMap({ reports, allReports = reports }) {
         mapRef.current?.destroy();
       }
       mapRef.current = null;
+      engineRef.current = null;
       markerLayerRef.current = null;
       tileLayerRef.current = null;
       mapKitAnnotationsRef.current = [];
       userMarkerRef.current = null;
-      fitTimersRef.current.forEach((timer) => window.clearTimeout(timer));
-      fitTimersRef.current = [];
-      resizeObserverRef.current?.disconnect();
-      resizeObserverRef.current = null;
     };
-  }, []);
+  }, [invalidateMapSize]);
 
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapRef.current || !mapReadyVersion) return;
 
     if (engineRef.current === "leaflet") {
       if (tileLayerRef.current) {
@@ -207,26 +312,29 @@ export default function ReportMap({ reports, allReports = reports }) {
       }
       tileLayerRef.current = L.tileLayer(LEAFLET_TILES[mapMode].url, {
         maxZoom: 19,
-        attribution: LEAFLET_TILES[mapMode].attribution
+        attribution: LEAFLET_TILES[mapMode].attribution,
+        updateWhenIdle: true,
+        keepBuffer: 2
       }).addTo(mapRef.current);
       setMapProvider(APPLE_MAPS_ENABLED ? "Satellite fallback" : mapMode === "satellite" ? "Satellite" : "Street");
+      invalidateMapSize();
     }
 
     if (engineRef.current === "mapkit" && window.mapkit) {
       mapRef.current.mapType = mapKitType(window.mapkit, mapMode);
     }
-  }, [mapMode]);
+  }, [invalidateMapSize, mapMode, mapReadyVersion]);
 
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapRef.current || !mapReadyVersion) return;
 
     if (engineRef.current === "mapkit" && window.mapkit) {
       const mapkit = window.mapkit;
       if (mapKitAnnotationsRef.current.length) {
         mapRef.current.removeAnnotations(mapKitAnnotationsRef.current);
       }
-      const annotations = reports.map((report) => {
-        const verificationLabel = getVerificationLabel(report, allReports);
+      const annotations = validReports.map((report) => {
+        const verificationLabel = getVerificationLabel(report, validAllReports);
         return new mapkit.MarkerAnnotation(new mapkit.Coordinate(report.latitude, report.longitude), {
           color: URGENCY_COLORS[report.urgency] || "#1f7a53",
           glyphText: CATEGORY_MARKERS[report.category] || "INFO",
@@ -244,61 +352,35 @@ export default function ReportMap({ reports, allReports = reports }) {
     if (!markerLayerRef.current) return;
     markerLayerRef.current.clearLayers();
 
-    reports.forEach((report) => {
+    validReports.forEach((report) => {
       const freshness = getFreshness(report);
-      const confidence = calculateConfidence(report, allReports);
-      const verificationLabel = getVerificationLabel(report, allReports);
+      const confidence = calculateConfidence(report, validAllReports);
+      const verificationLabel = getVerificationLabel(report, validAllReports);
       const marker = L.marker([report.latitude, report.longitude], {
         icon: L.divIcon({
-          className: `mesh-marker ${URGENCY_CLASS[report.urgency]} marker-${verificationLabel.toLowerCase().replaceAll(" ", "-")} ${report.status === "Resolved" ? "marker-resolved" : ""} ${freshness.label === "Stale" ? "marker-stale" : ""}`,
-          html: `<b>${CATEGORY_MARKERS[report.category] || "INFO"}</b><i></i>`,
+          className: markerClassName(report, verificationLabel, freshness),
+          html: `<b>${escapeHtml(CATEGORY_MARKERS[report.category] || "INFO")}</b><i></i>`,
           iconSize: [54, 38],
           iconAnchor: [27, 38]
-        })
+        }),
+        riseOnHover: true
       });
       marker.bindPopup(popupHtml(report, verificationLabel, freshness, confidence));
       marker.addTo(markerLayerRef.current);
     });
-
-  }, [reports, allReports]);
+  }, [validReports, validAllReports, mapReadyVersion]);
 
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapRef.current || !mapReadyVersion) return;
     fitTimersRef.current.forEach((timer) => window.clearTimeout(timer));
-    fitTimersRef.current = [120, 500, 1200].map((delay) => window.setTimeout(() => fitReports(), delay));
+    fitTimersRef.current = [60, 260].map((delay) =>
+      window.setTimeout(() => fitReports({ animate: false }), delay)
+    );
     return () => {
       fitTimersRef.current.forEach((timer) => window.clearTimeout(timer));
       fitTimersRef.current = [];
     };
-  }, [reportsKey]);
-
-  function fitReports() {
-    if (!mapRef.current) return;
-    if (!reports.length) {
-      if (engineRef.current === "leaflet") {
-        mapRef.current.invalidateSize();
-        mapRef.current.setView(WORLD_CENTER, 2, { animate: true });
-      }
-      if (engineRef.current === "mapkit" && window.mapkit) {
-        mapRef.current.setCenterAnimated(new window.mapkit.Coordinate(WORLD_CENTER[0], WORLD_CENTER[1]), true);
-      }
-      return;
-    }
-
-    if (engineRef.current === "mapkit" && mapKitAnnotationsRef.current.length) {
-      mapRef.current.showItems(mapKitAnnotationsRef.current, { animate: true });
-      return;
-    }
-
-    const points = reports.map((report) => [report.latitude, report.longitude]);
-    const uniquePoints = new Set(points.map((point) => point.join(",")));
-    mapRef.current.invalidateSize();
-    if (uniquePoints.size === 1) {
-      mapRef.current.setView(points[0], 16, { animate: true });
-      return;
-    }
-    mapRef.current.fitBounds(L.latLngBounds(points), { padding: [42, 42], maxZoom: 16, animate: true });
-  }
+  }, [fitReports, mapReadyVersion, reportsKey]);
 
   function locateDevice() {
     if (!navigator.geolocation) {
@@ -315,6 +397,8 @@ export default function ReportMap({ reports, allReports = reports }) {
         const latLng = [position.coords.latitude, position.coords.longitude];
         setLocationTone("success");
         setLocationMessage(`Showing real device location: ${latLng[0].toFixed(5)}, ${latLng[1].toFixed(5)}`);
+        userInteractedRef.current = true;
+        programmaticMoveRef.current = true;
 
         if (engineRef.current === "mapkit" && window.mapkit) {
           const mapkit = window.mapkit;
@@ -329,6 +413,7 @@ export default function ReportMap({ reports, allReports = reports }) {
           });
           mapRef.current.addAnnotation(userMarkerRef.current);
           mapRef.current.setCenterAnimated(coordinate, true);
+          finishProgrammaticMoveSoon();
           return;
         }
 
@@ -346,7 +431,8 @@ export default function ReportMap({ reports, allReports = reports }) {
           .bindPopup("Your real device location")
           .addTo(mapRef.current);
 
-        mapRef.current.setView(latLng, 16);
+        mapRef.current.setView(latLng, 16, { animate: true });
+        finishProgrammaticMoveSoon();
       },
       (error) => {
         const permissionDenied = error.code === error.PERMISSION_DENIED;
@@ -365,6 +451,11 @@ export default function ReportMap({ reports, allReports = reports }) {
     );
   }
 
+  function fitVisibleReports() {
+    userInteractedRef.current = false;
+    fitReports({ animate: true, force: true });
+  }
+
   return (
     <div className="map-shell">
       <div className="map-toolbar">
@@ -376,10 +467,10 @@ export default function ReportMap({ reports, allReports = reports }) {
             <Layers size={17} /> Street
           </button>
         </div>
-        <button type="button" className="secondary" onClick={fitReports} disabled={!reports.length}>
+        <button type="button" className="secondary" onClick={fitVisibleReports} disabled={!validReports.length || !mapReadyVersion}>
           <Crosshair size={18} /> Fit Reports
         </button>
-        <button type="button" className="secondary" onClick={locateDevice}>
+        <button type="button" className="secondary" onClick={locateDevice} disabled={!mapReadyVersion}>
           <LocateFixed size={18} /> My Location
         </button>
         {locationMessage && <span className={`location-message ${locationTone}`}>{locationMessage}</span>}
@@ -388,8 +479,8 @@ export default function ReportMap({ reports, allReports = reports }) {
         <div className="map-panel" ref={containerRef} />
         <div className="map-overlay-card">
           <span>{mapProvider}</span>
-          <strong>{reports.length} visible reports</strong>
-          <small>{openReportCount} open · {criticalCount} critical</small>
+          <strong>{validReports.length} visible reports</strong>
+          <small>{openReportCount} open / {criticalCount} critical</small>
         </div>
         <div className="map-legend" aria-label="Urgency legend">
           <span><i className="legend-dot low" /> Low</span>
@@ -397,7 +488,7 @@ export default function ReportMap({ reports, allReports = reports }) {
           <span><i className="legend-dot high" /> High</span>
           <span><i className="legend-dot critical" /> Critical</span>
         </div>
-        {!reports.length && (
+        {!validReports.length && (
           <div className="map-empty">
             <MapPinned size={24} />
             <strong>No mapped reports</strong>

@@ -44,6 +44,16 @@ import {
   sortByNewest
 } from "../utils/reportUtils";
 
+function sameStringList(first = [], second = []) {
+  if (first.length !== second.length) return false;
+  return first.every((value, index) => value === second[index]);
+}
+
+function getVisibleReports(candidateReports, ignoredIds = []) {
+  const ignored = new Set(ignoredIds);
+  return sortByNewest(candidateReports.filter((report) => !ignored.has(report.report_id)));
+}
+
 export function useReports() {
   const [reports, setReports] = useState([]);
   const [deviceId] = useState(() => getDeviceId());
@@ -57,22 +67,20 @@ export function useReports() {
   const clearInProgressRef = useRef(false);
   const demoRemovalInProgressRef = useRef(false);
   const reportsRef = useRef([]);
+  const ignoredReportIdsRef = useRef([]);
   const syncPromiseRef = useRef(null);
   const syncQueuedRef = useRef(false);
   const syncPausedRef = useRef(false);
+  const syncNowRef = useRef(null);
   const reportIdsKey = useMemo(() => reports.map((report) => report.report_id).sort().join("|"), [reports]);
 
   useEffect(() => {
     reportsRef.current = reports;
   }, [reports]);
 
-  const visibleReports = useCallback(
-    (candidateReports, ignoredIds = ignoredReportIds) => {
-      const ignored = new Set(ignoredIds);
-      return sortByNewest(candidateReports.filter((report) => !ignored.has(report.report_id)));
-    },
-    [ignoredReportIds]
-  );
+  useEffect(() => {
+    ignoredReportIdsRef.current = ignoredReportIds;
+  }, [ignoredReportIds]);
 
   const mergeIntoState = useCallback(async (incomingReports) => {
     if (clearInProgressRef.current) return;
@@ -89,15 +97,18 @@ export function useReports() {
         byId.set(normalized.report_id, mergeReport(byId.get(normalized.report_id), normalized));
       });
       const merged = [...byId.values()];
-      return visibleReports(merged);
+      return getVisibleReports(merged, ignoredReportIdsRef.current);
     });
-  }, [visibleReports]);
+  }, []);
 
   const removeFromState = useCallback(async (reportIds) => {
     if (!reportIds.length) return;
     await deleteReportsByIds(reportIds);
     await deleteIgnoredReportIds(reportIds);
-    setIgnoredReportIds((currentIds) => currentIds.filter((reportId) => !reportIds.includes(reportId)));
+    setIgnoredReportIds((currentIds) => {
+      const nextIds = currentIds.filter((reportId) => !reportIds.includes(reportId));
+      return sameStringList(currentIds, nextIds) ? currentIds : nextIds;
+    });
     setCommentsByReportId((currentComments) => {
       const nextComments = { ...currentComments };
       reportIds.forEach((reportId) => delete nextComments[reportId]);
@@ -107,13 +118,18 @@ export function useReports() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     Promise.all([getAllReports(), getIgnoredReportIds()])
       .then(([localReports, ignoredIds]) => {
-        setIgnoredReportIds(ignoredIds);
-        setReports(visibleReports(localReports, ignoredIds));
+        if (cancelled) return;
+        setIgnoredReportIds((currentIds) => (sameStringList(currentIds, ignoredIds) ? currentIds : ignoredIds));
+        setReports(getVisibleReports(localReports, ignoredIds));
       })
       .catch((error) => console.error("Unable to read local storage", error));
-  }, [visibleReports]);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     getVerificationConfig()
@@ -167,6 +183,20 @@ export function useReports() {
       };
     });
   }, []);
+
+  const socketHandlersRef = useRef({
+    mergeIntoState,
+    mergeCommentIntoState,
+    removeFromState
+  });
+
+  useEffect(() => {
+    socketHandlersRef.current = {
+      mergeIntoState,
+      mergeCommentIntoState,
+      removeFromState
+    };
+  }, [mergeIntoState, mergeCommentIntoState, removeFromState]);
 
   const refreshNodeStatus = useCallback(async () => {
     try {
@@ -264,10 +294,15 @@ export function useReports() {
   }, [runSyncCycle]);
 
   useEffect(() => {
-    syncNow();
-    const interval = window.setInterval(syncNow, 30000);
-    return () => window.clearInterval(interval);
+    syncNowRef.current = syncNow;
   }, [syncNow]);
+
+  useEffect(() => {
+    const runCurrentSync = () => syncNowRef.current?.();
+    runCurrentSync();
+    const interval = window.setInterval(runCurrentSync, 30000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     let socket;
@@ -285,13 +320,13 @@ export function useReports() {
           if (stopped) return;
           const message = JSON.parse(event.data);
           if (message.report) {
-            mergeIntoState([message.report]);
+            socketHandlersRef.current.mergeIntoState([message.report]);
           }
           if (message.type === "reports:deleted" && message.report_ids) {
-            removeFromState(message.report_ids);
+            socketHandlersRef.current.removeFromState(message.report_ids);
           }
           if (message.type === "comment:new" && message.comment) {
-            mergeCommentIntoState(message.comment);
+            socketHandlersRef.current.mergeCommentIntoState(message.comment);
           }
         };
         socket.onclose = () => {
@@ -313,7 +348,7 @@ export function useReports() {
         socket.close();
       }
     };
-  }, [mergeIntoState, mergeCommentIntoState, removeFromState]);
+  }, []);
 
   const createLocalReport = useCallback(
     async (report) => {
