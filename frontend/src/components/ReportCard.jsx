@@ -41,6 +41,16 @@ export default function ReportCard({ report, deviceId, onConfirm, onResolve, onI
       </div>
       {!compact && <p className="description">{report.description}</p>}
       <div className="meta-grid">
+        {report.locationName && (
+          <span>
+            <MapPin size={15} /> {report.locationName}
+          </span>
+        )}
+        {report.locationAddress && (
+          <span>
+            <MapPin size={15} /> {report.locationAddress}
+          </span>
+        )}
         <span>
           <MapPin size={15} /> {Number(report.latitude).toFixed(4)}, {Number(report.longitude).toFixed(4)}
         </span>

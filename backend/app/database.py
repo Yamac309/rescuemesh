@@ -40,7 +40,10 @@ def init_db() -> None:
         )
         existing_columns = {row["name"] for row in db.execute("PRAGMA table_info(reports)").fetchall()}
         report_columns = {
+            "location_name": "TEXT DEFAULT ''",
+            "location_address": "TEXT DEFAULT ''",
             "photo_evidence_attached": "INTEGER DEFAULT 0",
+            "is_demo": "INTEGER DEFAULT 0",
             "confidence_score": "INTEGER DEFAULT 30",
             "verification_label": "TEXT DEFAULT 'Unverified'",
             "evidence_reasons": "TEXT DEFAULT '[]'",
@@ -115,12 +118,15 @@ def row_to_report(row: sqlite3.Row) -> dict:
         "category": row["category"],
         "description": row["description"],
         "urgency": row["urgency"],
+        "location_name": row["location_name"] or "",
+        "location_address": row["location_address"] or "",
         "latitude": row["latitude"],
         "longitude": row["longitude"],
         "status": row["status"],
         "timestamp": row["timestamp"],
         "device_id": row["device_id"],
         "photo_evidence_attached": _bool(row["photo_evidence_attached"]),
+        "is_demo": _bool(row["is_demo"]),
         "confirmation_count": confirmation_count,
         "unique_confirmation_count": confirmation_count,
         "confidence_score": row["confidence_score"] or 30,
@@ -145,12 +151,15 @@ def report_select_sql(where_clause: str = "") -> str:
             r.category,
             r.description,
             r.urgency,
+            r.location_name,
+            r.location_address,
             r.latitude,
             r.longitude,
             r.status,
             r.timestamp,
             r.device_id,
             r.photo_evidence_attached,
+            r.is_demo,
             r.confidence_score,
             r.verification_label,
             r.evidence_reasons,
@@ -218,15 +227,18 @@ def insert_report(report: ReportCreate) -> tuple[bool, dict]:
                 category,
                 description,
                 urgency,
+                location_name,
+                location_address,
                 latitude,
                 longitude,
                 status,
                 timestamp,
                 device_id,
                 photo_evidence_attached,
+                is_demo,
                 seen_by_nodes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 report.report_id,
@@ -234,12 +246,15 @@ def insert_report(report: ReportCreate) -> tuple[bool, dict]:
                 report.category,
                 report.description,
                 report.urgency,
+                report.location_name,
+                report.location_address,
                 report.latitude,
                 report.longitude,
                 report.status,
                 report.timestamp,
                 report.device_id,
                 int(report.photo_evidence_attached),
+                int(report.is_demo),
                 json.dumps([get_node_id()]),
             ),
         )
@@ -461,6 +476,22 @@ def delete_reports_by_titles(titles: list[str]) -> list[str]:
             f"SELECT report_id FROM reports WHERE title IN ({placeholders})",
             titles,
         ).fetchall()
+        report_ids = [row["report_id"] for row in rows]
+        if report_ids:
+            db.executemany(
+                "INSERT OR IGNORE INTO deleted_reports (report_id) VALUES (?)",
+                [(report_id,) for report_id in report_ids],
+            )
+            id_placeholders = ",".join("?" for _ in report_ids)
+            db.execute(f"DELETE FROM confirmations WHERE report_id IN ({id_placeholders})", report_ids)
+            db.execute(f"DELETE FROM reports WHERE report_id IN ({id_placeholders})", report_ids)
+        db.commit()
+    return report_ids
+
+
+def delete_demo_reports() -> list[str]:
+    with get_connection() as db:
+        rows = db.execute("SELECT report_id FROM reports WHERE is_demo = 1").fetchall()
         report_ids = [row["report_id"] for row in rows]
         if report_ids:
             db.executemany(

@@ -25,12 +25,15 @@ class ReportBase(BaseModel):
     category: Category
     description: str = Field(default="", max_length=2000)
     urgency: Urgency
+    location_name: str = Field(default="", max_length=240)
+    location_address: str = Field(default="", max_length=500)
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     status: Status = "Unverified"
     timestamp: str
     device_id: str = Field(min_length=4)
     photo_evidence_attached: bool = False
+    is_demo: bool = False
 
 
 class ReportCreate(ReportBase):
@@ -96,6 +99,14 @@ class IncidentGuidanceResponse(BaseModel):
     source: Literal["google-ai", "local-fallback"]
     model: str | None = None
     unavailable_reason: str | None = None
+
+
+class LocationSuggestion(BaseModel):
+    name: str
+    address: str = ""
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    source: Literal["known-location", "openstreetmap"]
 
 
 class NodeStatus(BaseModel):

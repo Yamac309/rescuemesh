@@ -12,10 +12,12 @@ from . import database
 from .config.emergency_zone import get_emergency_zone, get_node_id
 from .services.incident_guidance import generate_incident_guidance
 from .services.location_checks import get_known_locations
+from .services.location_search import geocode_location
 from .schemas import (
     ConfirmRequest,
     IncidentGuidanceRequest,
     IncidentGuidanceResponse,
+    LocationSuggestion,
     NodeStatus,
     Report,
     ReportCreate,
@@ -197,7 +199,9 @@ async def add_responder_note(report_id: str, payload: ResponderNoteRequest) -> d
 
 @app.delete("/demo/reports", dependencies=[Depends(require_admin_token)])
 async def delete_demo_reports() -> dict:
-    deleted_report_ids = database.delete_reports_by_titles(DEMO_REPORT_TITLES)
+    deleted_report_ids = database.delete_demo_reports()
+    if not deleted_report_ids:
+        deleted_report_ids = database.delete_reports_by_titles(DEMO_REPORT_TITLES)
     if deleted_report_ids:
         await manager.broadcast({"type": "reports:deleted", "report_ids": deleted_report_ids})
     return {"deleted_report_ids": deleted_report_ids, "deleted_count": len(deleted_report_ids)}
@@ -237,6 +241,14 @@ def verification_config() -> dict:
     }
 
 
+@app.get("/geocode", response_model=list[LocationSuggestion])
+async def geocode(query: str, limit: int = 5) -> list[dict]:
+    cleaned_query = query.strip()
+    if len(cleaned_query) < 2:
+        return []
+    return await geocode_location(cleaned_query, limit)
+
+
 @app.get("/ai/status")
 def ai_status() -> dict:
     return {
@@ -260,6 +272,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             # TODO: Bridge Bluetooth, Wi-Fi Direct, Raspberry Pi, or LoRa node events into this stream.
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(websocket)
 
 

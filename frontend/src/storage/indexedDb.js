@@ -60,7 +60,16 @@ export async function saveReport(report) {
 }
 
 export async function saveReports(reports) {
-  await Promise.all(reports.map((report) => saveReport(report)));
+  if (!reports.length) return;
+  const { db, transaction, store } = await storeTransaction(REPORT_STORE, "readwrite");
+  return new Promise((resolve, reject) => {
+    reports.forEach((report) => store.put(normalizeReport(report)));
+    transaction.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onerror = () => reject(transaction.error);
+  });
 }
 
 export async function deleteReportsByIds(reportIds) {
@@ -123,6 +132,13 @@ export async function deleteReportsByTitles(titles) {
   const reports = await getAllReports();
   const titleSet = new Set(titles);
   const reportIds = reports.filter((report) => titleSet.has(report.title)).map((report) => report.report_id);
+  await deleteReportsByIds(reportIds);
+  return reportIds;
+}
+
+export async function deleteDemoReports() {
+  const reports = await getAllReports();
+  const reportIds = reports.filter((report) => report.isDemo || report.is_demo).map((report) => report.report_id);
   await deleteReportsByIds(reportIds);
   return reportIds;
 }
