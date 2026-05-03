@@ -1,5 +1,5 @@
 import { Ban, CheckCircle2, Sparkles } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getIncidentGuidance } from "../api/client";
 
 function cacheKeyFor(report) {
@@ -17,9 +17,84 @@ function cacheKeyFor(report) {
   ].join(":");
 }
 
+function localPreviewGuidance(report) {
+  const guidanceByCategory = {
+    "Need Help": {
+      should_do: [
+        "If anyone is in immediate danger, call emergency services first.",
+        "Move to the safest nearby place and share the report location with responders.",
+        "Keep your phone available for emergency calls and updates."
+      ],
+      avoid: [
+        "Do not enter unstable buildings, floodwater, or blocked areas.",
+        "Do not separate from your group unless a responder directs you.",
+        "Do not post private personal details in public updates."
+      ]
+    },
+    "Dangerous Area": {
+      should_do: [
+        "Warn people away from the area and share a safer route.",
+        "Move uphill or upwind if flooding, smoke, gas, or chemicals may be involved.",
+        "Update the report when trusted information changes."
+      ],
+      avoid: [
+        "Do not enter the area to take photos or check conditions.",
+        "Do not cross floodwater, unstable ground, or taped-off zones.",
+        "Do not spread unconfirmed hazard details as fact."
+      ]
+    },
+    "Blocked Road": {
+      should_do: [
+        "Report the exact blockage location and safest alternate route.",
+        "Keep people and vehicles back from debris, wires, and unstable trees.",
+        "Leave room for emergency vehicles and road crews."
+      ],
+      avoid: [
+        "Do not drive around barricades or through debris fields.",
+        "Do not touch downed wires or objects touching them.",
+        "Do not move heavy debris without proper equipment."
+      ]
+    },
+    "First Aid": {
+      should_do: [
+        "Call emergency services for severe bleeding, breathing trouble, chest pain, or unconsciousness.",
+        "Keep the injured person still, warm, and away from hazards.",
+        "Use trained first aid help if available."
+      ],
+      avoid: [
+        "Do not move someone with a possible neck or spine injury unless they are in immediate danger.",
+        "Do not give food or drink to an unconscious or severely injured person.",
+        "Do not attempt advanced care without training."
+      ]
+    }
+  };
+  const guidance = guidanceByCategory[report.category] || {
+    should_do: [
+      "Keep the update short, specific, and tied to a location.",
+      "Include what changed and when it was observed.",
+      "Refresh the report if conditions change."
+    ],
+    avoid: [
+      "Do not include rumors, private details, or unclear secondhand claims.",
+      "Do not mark the update confirmed without a trusted source.",
+      "Do not duplicate older reports when an update would be clearer."
+    ]
+  };
+
+  return {
+    ...guidance,
+    safety_note: "Local safety guidance shown while Gemini responds. Follow official responder instructions when available.",
+    source: "local-fallback",
+    model: null,
+    unavailable_reason: null
+  };
+}
+
 export default function AiIncidentGuidance({ report }) {
   const [guidance, setGuidance] = useState(null);
   const [state, setState] = useState("idle");
+  const requestRef = useRef(null);
+  const mountedRef = useRef(true);
   const cacheKey = useMemo(() => cacheKeyFor(report), [report]);
   const guidancePayload = useMemo(
     () => ({
@@ -31,9 +106,9 @@ export default function AiIncidentGuidance({ report }) {
       timestamp: report.timestamp,
       latitude: report.latitude,
       longitude: report.longitude,
-      confidenceScore: report.confidenceScore,
-      verificationLabel: report.verificationLabel,
-      agingLabel: report.agingLabel
+      confidence_score: report.confidenceScore,
+      verification_label: report.verificationLabel,
+      aging_label: report.agingLabel
     }),
     [
       report.title,
@@ -83,32 +158,57 @@ export default function AiIncidentGuidance({ report }) {
     setState("idle");
   }, [cacheKey]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (requestRef.current) requestRef.current.abort();
+    };
+  }, []);
+
   function generateGuidance() {
-    let cancelled = false;
+    if (state === "loading") return;
+
+    if (requestRef.current) requestRef.current.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const previewId = window.setTimeout(() => {
+      if (controller.signal.aborted || !mountedRef.current) return;
+      setGuidance(localPreviewGuidance(report));
+      setState("ready");
+    }, 1200);
+    const timeoutId = window.setTimeout(() => controller.abort(), 10000);
+
     setState("loading");
-    getIncidentGuidance(guidancePayload)
+    getIncidentGuidance(guidancePayload, { signal: controller.signal })
       .then((nextGuidance) => {
-        if (cancelled) return;
+        if (controller.signal.aborted || !mountedRef.current) return;
+        window.clearTimeout(previewId);
         try {
           const serialized = JSON.stringify({ guidance: nextGuidance, cachedAt: Date.now() });
-          if (nextGuidance.source === "google-ai") {
-            localStorage.setItem(cacheKey, serialized);
-          } else {
-            sessionStorage.setItem(cacheKey, serialized);
-          }
+          if (nextGuidance.source === "google-ai") localStorage.setItem(cacheKey, serialized);
         } catch {
           // Guidance can still render if browser session storage is unavailable.
         }
         setGuidance(nextGuidance);
         setState("ready");
       })
-      .catch(() => {
-        if (!cancelled) setState("error");
+      .catch((error) => {
+        if (!mountedRef.current) return;
+        window.clearTimeout(previewId);
+        if (controller.signal.aborted) {
+          setGuidance(localPreviewGuidance(report));
+          setState("ready");
+          return;
+        }
+        console.error("Gemini guidance request failed", error);
+        setState("error");
+      })
+      .finally(() => {
+        window.clearTimeout(previewId);
+        window.clearTimeout(timeoutId);
+        if (requestRef.current === controller) requestRef.current = null;
       });
-
-    return () => {
-      cancelled = true;
-    };
   }
 
   if (state === "idle") {
@@ -119,7 +219,7 @@ export default function AiIncidentGuidance({ report }) {
           <span>Gemini</span>
         </div>
         <p className="ai-guidance-loading">Generate incident-specific guidance for this report with Gemini.</p>
-        <button type="button" className="secondary ai-guidance-button" onClick={generateGuidance}>
+        <button type="button" className="secondary ai-guidance-button" onClick={generateGuidance} disabled={state === "loading"}>
           <Sparkles size={16} /> Generate Gemini Guidance
         </button>
       </section>
@@ -143,7 +243,12 @@ export default function AiIncidentGuidance({ report }) {
         <div className="ai-guidance-title">
           <Sparkles size={16} /> Incident guidance
         </div>
-        <p className="ai-guidance-loading">Gemini guidance is unavailable right now.</p>
+        <p className="ai-guidance-loading">
+          {guidance?.unavailable_reason || "Gemini guidance is unavailable right now."}
+        </p>
+        <button type="button" className="secondary ai-guidance-button" onClick={generateGuidance} disabled={state === "loading"}>
+          <Sparkles size={16} /> Try Gemini Again
+        </button>
       </section>
     );
   }
@@ -155,7 +260,10 @@ export default function AiIncidentGuidance({ report }) {
           <Sparkles size={16} /> Incident guidance
           <span>Gemini unavailable</span>
         </div>
-        <p className="ai-guidance-loading">{guidance.safety_note}</p>
+        <p className="ai-guidance-loading">{guidance.unavailable_reason || guidance.safety_note}</p>
+        <button type="button" className="secondary ai-guidance-button" onClick={generateGuidance} disabled={state === "loading"}>
+          <Sparkles size={16} /> Try Gemini Again
+        </button>
       </section>
     );
   }

@@ -1,199 +1,304 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Eye, LocateFixed, Maximize2 } from "lucide-react";
-import { CATEGORY_MARKERS, WORLD_CENTER } from "../utils/constants";
+import L from "leaflet";
+import { Crosshair, Layers, LocateFixed, MapPinned, Satellite } from "lucide-react";
+import { CATEGORY_MARKERS, URGENCY_CLASS, WORLD_CENTER } from "../utils/constants";
 import { calculateConfidence, getFreshness, getVerificationLabel } from "../utils/reportUtils";
 
-const GOOGLE_MAPS_SCRIPT_ID = "rescuemesh-google-maps";
+const MAPKIT_TOKEN = import.meta.env.VITE_MAPKIT_JS_TOKEN;
+const APPLE_MAPS_ENABLED = Boolean(MAPKIT_TOKEN?.trim());
 
-function loadGoogleMaps(apiKey) {
-  if (window.google?.maps) {
-    return Promise.resolve(window.google.maps);
+const LEAFLET_TILES = {
+  satellite: {
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Tiles &copy; Esri"
+  },
+  street: {
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: "&copy; OpenStreetMap contributors"
   }
+};
 
-  const existingScript = document.getElementById(GOOGLE_MAPS_SCRIPT_ID);
-  if (existingScript) {
-    return new Promise((resolve, reject) => {
-      existingScript.addEventListener("load", () => resolve(window.google.maps), { once: true });
-      existingScript.addEventListener("error", reject, { once: true });
-    });
-  }
+const URGENCY_COLORS = {
+  Low: "#2463a7",
+  Medium: "#bd6b00",
+  High: "#cc4b24",
+  Critical: "#b42318"
+};
 
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.id = GOOGLE_MAPS_SCRIPT_ID;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly`;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve(window.google.maps);
-    script.onerror = reject;
-    document.head.appendChild(script);
+let mapKitLoadPromise;
+
+function loadMapKit() {
+  if (!APPLE_MAPS_ENABLED) return Promise.reject(new Error("MapKit token is not configured."));
+  if (window.mapkit && window.__rescueMeshMapKitReady) return Promise.resolve(window.mapkit);
+  if (mapKitLoadPromise) return mapKitLoadPromise;
+
+  mapKitLoadPromise = new Promise((resolve, reject) => {
+    const existingScript = document.querySelector("script[data-rescuemesh-mapkit]");
+    const script = existingScript || document.createElement("script");
+
+    script.addEventListener(
+      "load",
+      () => {
+        if (!window.mapkit) {
+          reject(new Error("MapKit JS did not load."));
+          return;
+        }
+        if (!window.__rescueMeshMapKitReady) {
+          window.mapkit.init({
+            authorizationCallback(done) {
+              done(MAPKIT_TOKEN);
+            }
+          });
+          window.__rescueMeshMapKitReady = true;
+        }
+        resolve(window.mapkit);
+      },
+      { once: true }
+    );
+    script.addEventListener("error", () => reject(new Error("MapKit JS failed to load.")), { once: true });
+
+    if (!existingScript) {
+      script.src = "https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js";
+      script.crossOrigin = "anonymous";
+      script.dataset.rescuemeshMapkit = "true";
+      document.head.appendChild(script);
+    }
   });
+
+  return mapKitLoadPromise;
 }
 
-function popupHtml(report, allReports) {
-  const freshness = getFreshness(report);
-  const confidence = calculateConfidence(report, allReports);
-  const verificationLabel = getVerificationLabel(report, allReports);
+function mapKitType(mapkit, mode) {
+  const types = mapkit.Map?.MapTypes || {};
+  if (mode === "street") return types.Standard || types.MutedStandard;
+  return types.Hybrid || types.Satellite || types.Standard;
+}
 
+function popupHtml(report, verificationLabel, freshness, confidence) {
   return `
-    <div class="google-map-popup">
+    <div class="map-popup">
       <strong>${report.title}</strong>
-      <p>${report.description || ""}</p>
-      <p><b>Category:</b> ${report.category}</p>
-      <p><b>Urgency:</b> ${report.urgency}</p>
-      <p><b>Status:</b> ${report.status}</p>
-      <p><b>Verification:</b> ${verificationLabel}</p>
-      <p><b>Freshness:</b> ${freshness.label}</p>
-      <p><b>Confidence:</b> ${confidence}%</p>
-      <p><b>Time:</b> ${new Date(report.timestamp).toLocaleString()}</p>
+      ${report.locationName ? `<span>${report.locationName}</span>` : ""}
+      ${report.locationAddress ? `<small>${report.locationAddress}</small>` : ""}
+      ${report.description ? `<p>${report.description}</p>` : ""}
+      <dl>
+        <dt>Urgency</dt><dd>${report.urgency}</dd>
+        <dt>Status</dt><dd>${report.status}</dd>
+        <dt>Verification</dt><dd>${verificationLabel}</dd>
+        <dt>Freshness</dt><dd>${freshness.label}</dd>
+        <dt>Confidence</dt><dd>${confidence}%</dd>
+      </dl>
     </div>
   `;
 }
 
 export default function ReportMap({ reports, allReports = reports }) {
-  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   const mapRef = useRef(null);
-  const mapContainerRef = useRef(null);
-  const panoramaContainerRef = useRef(null);
-  const panoramaRef = useRef(null);
-  const streetViewServiceRef = useRef(null);
-  const markersRef = useRef([]);
+  const engineRef = useRef(null);
+  const containerRef = useRef(null);
+  const markerLayerRef = useRef(null);
+  const tileLayerRef = useRef(null);
+  const mapKitAnnotationsRef = useRef([]);
   const userMarkerRef = useRef(null);
-  const infoWindowRef = useRef(null);
-  const hasAutoFitRef = useRef(false);
-  const userMovedMapRef = useRef(false);
-  const programmaticMoveRef = useRef(false);
-  const previousReportKeyRef = useRef("");
-  const [mapState, setMapState] = useState(apiKey ? "loading" : "missing-key");
-  const [selectedReport, setSelectedReport] = useState(null);
-  const [streetViewMessage, setStreetViewMessage] = useState("");
+  const fitTimersRef = useRef([]);
+  const resizeObserverRef = useRef(null);
   const [locationMessage, setLocationMessage] = useState("");
   const [locationTone, setLocationTone] = useState("info");
+  const [mapMode, setMapMode] = useState("satellite");
+  const [mapProvider, setMapProvider] = useState(APPLE_MAPS_ENABLED ? "Loading Apple Maps" : "Satellite");
 
-  const reportKey = useMemo(() => reports.map((report) => report.report_id).sort().join("|"), [reports]);
+  const center = useMemo(() => {
+    if (!reports.length) return WORLD_CENTER;
+    return [reports[0].latitude, reports[0].longitude];
+  }, [reports]);
+
+  const openReportCount = reports.filter((report) => report.status !== "Resolved").length;
+  const criticalCount = reports.filter((report) => report.urgency === "Critical" && report.status !== "Resolved").length;
+  const reportsKey = useMemo(
+    () => reports.map((report) => `${report.report_id}:${report.latitude}:${report.longitude}`).join("|"),
+    [reports]
+  );
 
   useEffect(() => {
-    if (!apiKey || !mapContainerRef.current || mapRef.current) return;
+    if (!containerRef.current || mapRef.current) return undefined;
+    let canceled = false;
 
-    let cancelled = false;
-    loadGoogleMaps(apiKey)
-      .then((maps) => {
-        if (cancelled || !mapContainerRef.current) return;
+    function createLeafletMap(providerLabel = "Satellite") {
+      if (canceled || !containerRef.current || mapRef.current) return;
+      engineRef.current = "leaflet";
+      setMapProvider(providerLabel);
 
-        const map = new maps.Map(mapContainerRef.current, {
-          center: { lat: WORLD_CENTER[0], lng: WORLD_CENTER[1] },
-          zoom: 2,
-          mapTypeControl: true,
-          fullscreenControl: true,
-          streetViewControl: true,
-          zoomControl: true,
-          gestureHandling: "greedy",
-          clickableIcons: false,
+      const map = L.map(containerRef.current, {
+        zoomControl: false,
+        preferCanvas: true
+      }).setView(center, reports.length ? 15 : 2);
+      mapRef.current = map;
+      L.control.zoom({ position: "bottomright" }).addTo(map);
+      markerLayerRef.current = L.layerGroup().addTo(map);
+      tileLayerRef.current = L.tileLayer(LEAFLET_TILES[mapMode].url, {
+        maxZoom: 19,
+        attribution: LEAFLET_TILES[mapMode].attribution
+      }).addTo(map);
+      if (window.ResizeObserver) {
+        resizeObserverRef.current = new ResizeObserver(() => {
+          map.invalidateSize();
         });
+        resizeObserverRef.current.observe(containerRef.current);
+      }
+      window.requestAnimationFrame(() => map.invalidateSize());
+      window.setTimeout(() => fitReports(), 0);
+    }
 
-        const panorama = new maps.StreetViewPanorama(panoramaContainerRef.current, {
-          position: { lat: WORLD_CENTER[0], lng: WORLD_CENTER[1] },
-          pov: { heading: 0, pitch: 0 },
-          visible: false,
-          addressControl: true,
-          fullscreenControl: true,
-          linksControl: true,
-          panControl: true,
-          zoomControl: true,
+    if (APPLE_MAPS_ENABLED) {
+      loadMapKit()
+        .then((mapkit) => {
+          if (canceled || !containerRef.current || mapRef.current) return;
+          engineRef.current = "mapkit";
+          setMapProvider("Apple Maps");
+          const map = new mapkit.Map(containerRef.current, {
+            showsCompass: mapkit.FeatureVisibility?.Adaptive,
+            showsMapTypeControl: true,
+            showsScale: mapkit.FeatureVisibility?.Adaptive,
+            showsZoomControl: true,
+            tintColor: "#1f7a53"
+          });
+          map.mapType = mapKitType(mapkit, mapMode);
+          mapRef.current = map;
+          if (reports.length) {
+            map.center = new mapkit.Coordinate(center[0], center[1]);
+          }
+          window.setTimeout(() => fitReports(), 0);
+        })
+        .catch(() => {
+          setLocationTone("warning");
+          setLocationMessage("Apple Maps could not load here, so RescueMesh switched to the satellite fallback.");
+          createLeafletMap("Satellite fallback");
         });
-
-        map.setStreetView(panorama);
-        mapRef.current = map;
-        panoramaRef.current = panorama;
-        streetViewServiceRef.current = new maps.StreetViewService();
-        infoWindowRef.current = new maps.InfoWindow();
-
-        map.addListener("dragstart", () => {
-          if (!programmaticMoveRef.current) userMovedMapRef.current = true;
-        });
-        map.addListener("zoom_changed", () => {
-          if (!programmaticMoveRef.current) userMovedMapRef.current = true;
-        });
-
-        setMapState("ready");
-      })
-      .catch(() => setMapState("error"));
+    } else {
+      createLeafletMap("Satellite");
+    }
 
     return () => {
-      cancelled = true;
-      markersRef.current.forEach((marker) => marker.setMap(null));
-      markersRef.current = [];
-      userMarkerRef.current?.setMap(null);
+      canceled = true;
+      if (engineRef.current === "leaflet") {
+        mapRef.current?.remove();
+      }
+      if (engineRef.current === "mapkit") {
+        mapRef.current?.destroy();
+      }
       mapRef.current = null;
-      panoramaRef.current = null;
-      streetViewServiceRef.current = null;
-      infoWindowRef.current = null;
+      markerLayerRef.current = null;
+      tileLayerRef.current = null;
+      mapKitAnnotationsRef.current = [];
+      userMarkerRef.current = null;
+      fitTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      fitTimersRef.current = [];
+      resizeObserverRef.current?.disconnect();
+      resizeObserverRef.current = null;
     };
-  }, [apiKey]);
+  }, []);
 
-  function fitReports({ force = false } = {}) {
-    if (!mapRef.current || !window.google?.maps) return;
-    const maps = window.google.maps;
+  useEffect(() => {
+    if (!mapRef.current) return;
 
-    if (!reports.length) {
-      programmaticMoveRef.current = true;
-      mapRef.current.setCenter({ lat: WORLD_CENTER[0], lng: WORLD_CENTER[1] });
-      mapRef.current.setZoom(2);
-      programmaticMoveRef.current = false;
+    if (engineRef.current === "leaflet") {
+      if (tileLayerRef.current) {
+        tileLayerRef.current.remove();
+      }
+      tileLayerRef.current = L.tileLayer(LEAFLET_TILES[mapMode].url, {
+        maxZoom: 19,
+        attribution: LEAFLET_TILES[mapMode].attribution
+      }).addTo(mapRef.current);
+      setMapProvider(APPLE_MAPS_ENABLED ? "Satellite fallback" : mapMode === "satellite" ? "Satellite" : "Street");
+    }
+
+    if (engineRef.current === "mapkit" && window.mapkit) {
+      mapRef.current.mapType = mapKitType(window.mapkit, mapMode);
+    }
+  }, [mapMode]);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    if (engineRef.current === "mapkit" && window.mapkit) {
+      const mapkit = window.mapkit;
+      if (mapKitAnnotationsRef.current.length) {
+        mapRef.current.removeAnnotations(mapKitAnnotationsRef.current);
+      }
+      const annotations = reports.map((report) => {
+        const verificationLabel = getVerificationLabel(report, allReports);
+        return new mapkit.MarkerAnnotation(new mapkit.Coordinate(report.latitude, report.longitude), {
+          color: URGENCY_COLORS[report.urgency] || "#1f7a53",
+          glyphText: CATEGORY_MARKERS[report.category] || "INFO",
+          title: report.title,
+          subtitle: report.locationAddress || report.locationName || verificationLabel
+        });
+      });
+      mapKitAnnotationsRef.current = annotations;
+      if (annotations.length) {
+        mapRef.current.addAnnotations(annotations);
+      }
       return;
     }
 
-    programmaticMoveRef.current = true;
-    if (reports.length === 1) {
-      const report = reports[0];
-      mapRef.current.setCenter({ lat: Number(report.latitude), lng: Number(report.longitude) });
-      mapRef.current.setZoom(force ? 16 : Math.max(mapRef.current.getZoom() || 14, 14));
-    } else {
-      const bounds = new maps.LatLngBounds();
-      reports.forEach((report) => bounds.extend({ lat: Number(report.latitude), lng: Number(report.longitude) }));
-      mapRef.current.fitBounds(bounds, 48);
-    }
-    window.setTimeout(() => {
-      programmaticMoveRef.current = false;
-    }, 0);
-  }
+    if (!markerLayerRef.current) return;
+    markerLayerRef.current.clearLayers();
 
-  useEffect(() => {
-    if (mapState !== "ready" || !mapRef.current || !window.google?.maps) return;
-    const maps = window.google.maps;
-
-    markersRef.current.forEach((marker) => marker.setMap(null));
-    markersRef.current = reports.map((report) => {
-      const marker = new maps.Marker({
-        map: mapRef.current,
-        position: { lat: Number(report.latitude), lng: Number(report.longitude) },
-        title: report.title,
-        label: {
-          text: CATEGORY_MARKERS[report.category] || "INFO",
-          color: "#ffffff",
-          fontWeight: "800",
-          fontSize: "11px",
-        },
+    reports.forEach((report) => {
+      const freshness = getFreshness(report);
+      const confidence = calculateConfidence(report, allReports);
+      const verificationLabel = getVerificationLabel(report, allReports);
+      const marker = L.marker([report.latitude, report.longitude], {
+        icon: L.divIcon({
+          className: `mesh-marker ${URGENCY_CLASS[report.urgency]} marker-${verificationLabel.toLowerCase().replaceAll(" ", "-")} ${report.status === "Resolved" ? "marker-resolved" : ""} ${freshness.label === "Stale" ? "marker-stale" : ""}`,
+          html: `<b>${CATEGORY_MARKERS[report.category] || "INFO"}</b><i></i>`,
+          iconSize: [54, 38],
+          iconAnchor: [27, 38]
+        })
       });
-
-      marker.addListener("click", () => {
-        setSelectedReport(report);
-        setStreetViewMessage("");
-        infoWindowRef.current.setContent(popupHtml(report, allReports));
-        infoWindowRef.current.open({ map: mapRef.current, anchor: marker });
-      });
-
-      return marker;
+      marker.bindPopup(popupHtml(report, verificationLabel, freshness, confidence));
+      marker.addTo(markerLayerRef.current);
     });
 
-    const reportsChanged = previousReportKeyRef.current !== reportKey;
-    previousReportKeyRef.current = reportKey;
+  }, [reports, allReports]);
 
-    if (!hasAutoFitRef.current || (reportsChanged && !userMovedMapRef.current)) {
-      fitReports();
-      hasAutoFitRef.current = true;
+  useEffect(() => {
+    if (!mapRef.current) return;
+    fitTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    fitTimersRef.current = [120, 500, 1200].map((delay) => window.setTimeout(() => fitReports(), delay));
+    return () => {
+      fitTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      fitTimersRef.current = [];
+    };
+  }, [reportsKey]);
+
+  function fitReports() {
+    if (!mapRef.current) return;
+    if (!reports.length) {
+      if (engineRef.current === "leaflet") {
+        mapRef.current.invalidateSize();
+        mapRef.current.setView(WORLD_CENTER, 2, { animate: true });
+      }
+      if (engineRef.current === "mapkit" && window.mapkit) {
+        mapRef.current.setCenterAnimated(new window.mapkit.Coordinate(WORLD_CENTER[0], WORLD_CENTER[1]), true);
+      }
+      return;
     }
-  }, [reports, allReports, reportKey, mapState]);
+
+    if (engineRef.current === "mapkit" && mapKitAnnotationsRef.current.length) {
+      mapRef.current.showItems(mapKitAnnotationsRef.current, { animate: true });
+      return;
+    }
+
+    const points = reports.map((report) => [report.latitude, report.longitude]);
+    const uniquePoints = new Set(points.map((point) => point.join(",")));
+    mapRef.current.invalidateSize();
+    if (uniquePoints.size === 1) {
+      mapRef.current.setView(points[0], 16, { animate: true });
+      return;
+    }
+    mapRef.current.fitBounds(L.latLngBounds(points), { padding: [42, 42], maxZoom: 16, animate: true });
+  }
 
   function locateDevice() {
     if (!navigator.geolocation) {
@@ -207,37 +312,41 @@ export default function ReportMap({ reports, allReports = reports }) {
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        const latLng = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        };
+        const latLng = [position.coords.latitude, position.coords.longitude];
         setLocationTone("success");
-        setLocationMessage(`Showing real device location: ${latLng.lat.toFixed(5)}, ${latLng.lng.toFixed(5)}`);
+        setLocationMessage(`Showing real device location: ${latLng[0].toFixed(5)}, ${latLng[1].toFixed(5)}`);
 
-        if (userMarkerRef.current) {
-          userMarkerRef.current.setMap(null);
+        if (engineRef.current === "mapkit" && window.mapkit) {
+          const mapkit = window.mapkit;
+          if (userMarkerRef.current) {
+            mapRef.current.removeAnnotation(userMarkerRef.current);
+          }
+          const coordinate = new mapkit.Coordinate(latLng[0], latLng[1]);
+          userMarkerRef.current = new mapkit.MarkerAnnotation(coordinate, {
+            color: "#2fb36d",
+            glyphText: "YOU",
+            title: "Your real device location"
+          });
+          mapRef.current.addAnnotation(userMarkerRef.current);
+          mapRef.current.setCenterAnimated(coordinate, true);
+          return;
         }
 
-        userMarkerRef.current = new window.google.maps.Marker({
-          map: mapRef.current,
-          position: latLng,
-          title: "Your real device location",
-          icon: {
-            path: window.google.maps.SymbolPath.CIRCLE,
-            scale: 8,
-            fillColor: "#2fb36d",
-            fillOpacity: 1,
-            strokeColor: "#155b3d",
-            strokeWeight: 3,
-          },
-        });
+        if (userMarkerRef.current) {
+          userMarkerRef.current.remove();
+        }
 
-        programmaticMoveRef.current = true;
-        mapRef.current.setCenter(latLng);
-        mapRef.current.setZoom(15);
-        window.setTimeout(() => {
-          programmaticMoveRef.current = false;
-        }, 0);
+        userMarkerRef.current = L.circleMarker(latLng, {
+          radius: 10,
+          color: "#ffffff",
+          fillColor: "#2fb36d",
+          fillOpacity: 0.95,
+          weight: 4
+        })
+          .bindPopup("Your real device location")
+          .addTo(mapRef.current);
+
+        mapRef.current.setView(latLng, 16);
       },
       (error) => {
         const permissionDenied = error.code === error.PERMISSION_DENIED;
@@ -251,33 +360,7 @@ export default function ReportMap({ reports, allReports = reports }) {
       {
         enableHighAccuracy: true,
         maximumAge: 0,
-        timeout: 10000,
-      }
-    );
-  }
-
-  function openStreetViewForSelected() {
-    if (!selectedReport || !streetViewServiceRef.current || !panoramaRef.current) return;
-    const position = { lat: Number(selectedReport.latitude), lng: Number(selectedReport.longitude) };
-    setStreetViewMessage("Searching for nearby Google Street View imagery...");
-
-    streetViewServiceRef.current.getPanorama(
-      {
-        location: position,
-        radius: 80,
-        source: window.google.maps.StreetViewSource.OUTDOOR,
-      },
-      (data, status) => {
-        if (status !== "OK" || !data?.location?.latLng) {
-          panoramaRef.current.setVisible(false);
-          setStreetViewMessage("No nearby Street View imagery was found for this report.");
-          return;
-        }
-
-        panoramaRef.current.setPosition(data.location.latLng);
-        panoramaRef.current.setPov({ heading: 0, pitch: 0 });
-        panoramaRef.current.setVisible(true);
-        setStreetViewMessage(`Street View opened near ${selectedReport.title}.`);
+        timeout: 10000
       }
     );
   }
@@ -285,32 +368,42 @@ export default function ReportMap({ reports, allReports = reports }) {
   return (
     <div className="map-shell">
       <div className="map-toolbar">
-        <button type="button" className="secondary" onClick={locateDevice} disabled={mapState !== "ready"}>
-          <LocateFixed size={18} /> Show My Real Location
+        <div className="segmented-control" aria-label="Map view">
+          <button type="button" className={mapMode === "satellite" ? "active" : ""} onClick={() => setMapMode("satellite")}>
+            <Satellite size={17} /> Satellite
+          </button>
+          <button type="button" className={mapMode === "street" ? "active" : ""} onClick={() => setMapMode("street")}>
+            <Layers size={17} /> Street
+          </button>
+        </div>
+        <button type="button" className="secondary" onClick={fitReports} disabled={!reports.length}>
+          <Crosshair size={18} /> Fit Reports
         </button>
-        <button type="button" className="secondary" onClick={() => fitReports({ force: true })} disabled={!reports.length || mapState !== "ready"}>
-          <Maximize2 size={18} /> Fit Reports
+        <button type="button" className="secondary" onClick={locateDevice}>
+          <LocateFixed size={18} /> My Location
         </button>
-        <button type="button" className="secondary" onClick={openStreetViewForSelected} disabled={!selectedReport || mapState !== "ready"}>
-          <Eye size={18} /> Street View
-        </button>
-        {selectedReport && <span className="location-message">Selected: {selectedReport.title}</span>}
         {locationMessage && <span className={`location-message ${locationTone}`}>{locationMessage}</span>}
       </div>
-      <div className="google-map-grid">
-        <div className="map-panel google-map-panel" ref={mapContainerRef}>
-          {mapState === "missing-key" && (
-            <div className="map-empty-state">
-              Add `VITE_GOOGLE_MAPS_API_KEY` to `frontend/.env` to enable Google Maps and Street View.
-            </div>
-          )}
-          {mapState === "loading" && <div className="map-empty-state">Loading Google Maps...</div>}
-          {mapState === "error" && <div className="map-empty-state">Google Maps could not load. Check the browser API key and billing setup.</div>}
+      <div className="map-panel-wrap">
+        <div className="map-panel" ref={containerRef} />
+        <div className="map-overlay-card">
+          <span>{mapProvider}</span>
+          <strong>{reports.length} visible reports</strong>
+          <small>{openReportCount} open · {criticalCount} critical</small>
         </div>
-        <div className="street-view-panel">
-          <div ref={panoramaContainerRef} className="street-view-canvas" />
-          <p>{streetViewMessage || "Select a report marker, then click Street View to inspect nearby imagery."}</p>
+        <div className="map-legend" aria-label="Urgency legend">
+          <span><i className="legend-dot low" /> Low</span>
+          <span><i className="legend-dot medium" /> Medium</span>
+          <span><i className="legend-dot high" /> High</span>
+          <span><i className="legend-dot critical" /> Critical</span>
         </div>
+        {!reports.length && (
+          <div className="map-empty">
+            <MapPinned size={24} />
+            <strong>No mapped reports</strong>
+            <span>Adjust filters or create a report with a location.</span>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -300,6 +300,10 @@ export function normalizeReport(report) {
   const verificationSignals = report.verificationSignals || report.verification_signals || {};
   return {
     ...report,
+    location_name: report.location_name ?? report.locationName ?? "",
+    locationName: report.location_name ?? report.locationName ?? "",
+    location_address: report.location_address ?? report.locationAddress ?? "",
+    locationAddress: report.location_address ?? report.locationAddress ?? "",
     latitude: Number(report.latitude),
     longitude: Number(report.longitude),
     confirmation_count: report.confirmation_count ?? 0,
@@ -315,6 +319,8 @@ export function normalizeReport(report) {
     responderRejected: report.responder_rejected ?? report.responderRejected ?? false,
     responderNote: report.responder_note ?? report.responderNote ?? "",
     photoEvidenceAttached: report.photo_evidence_attached ?? report.photoEvidenceAttached ?? false,
+    is_demo: report.is_demo ?? report.isDemo ?? false,
+    isDemo: report.is_demo ?? report.isDemo ?? false,
     seenByNodes: report.seen_by_nodes ?? report.seenByNodes ?? [],
     confirmed_by_device_ids: report.confirmed_by_device_ids || [],
     sync_state: report.sync_state || "synced"
@@ -336,6 +342,8 @@ export function toCsv(reports) {
     "category",
     "description",
     "urgency",
+    "locationName",
+    "locationAddress",
     "latitude",
     "longitude",
     "status",

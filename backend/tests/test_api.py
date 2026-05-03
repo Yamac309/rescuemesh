@@ -36,9 +36,14 @@ def report_with(report_id: str, **overrides) -> dict:
 
 
 def test_report_creation(client: TestClient) -> None:
-    response = client.post("/reports", json=sample_report())
+    response = client.post(
+        "/reports",
+        json={**sample_report(), "location_name": "Library", "location_address": "100 Library Walk, RescueMesh Campus"},
+    )
     assert response.status_code == 201
     assert response.json()["report_id"] == "local-report-1"
+    assert response.json()["location_name"] == "Library"
+    assert response.json()["location_address"] == "100 Library Walk, RescueMesh Campus"
 
     reports = client.get("/reports").json()
     assert len(reports) == 1
@@ -91,7 +96,7 @@ def test_marking_report_resolved(client: TestClient) -> None:
 
 
 def test_delete_demo_reports(client: TestClient) -> None:
-    client.post("/reports", json=sample_report())
+    client.post("/reports", json={**sample_report(), "is_demo": True})
     client.post("/reports", json={**sample_report("custom-report-1"), "title": "Custom field report"})
 
     response = client.delete("/demo/reports")
@@ -111,6 +116,17 @@ def test_delete_all_reports(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.json()["deleted_count"] == 2
     assert client.get("/reports").json() == []
+
+
+def test_geocode_returns_known_locations_without_remote_lookup(client: TestClient) -> None:
+    response = client.get("/geocode", params={"query": "library"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body[0]["name"] == "Library"
+    assert body[0]["source"] == "known-location"
+    assert body[0]["address"] == "100 Library Walk, RescueMesh Campus"
+    assert body[0]["latitude"] == 40.7136
 
 
 def test_public_mode_requires_admin_token_for_delete(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -257,9 +273,9 @@ def test_incident_guidance_uses_local_fallback_without_google_key(client: TestCl
     body = response.json()
     assert response.status_code == 200
     assert body["source"] == "local-fallback"
-    assert body["should_do"] == []
-    assert body["avoid"] == []
-    assert body["safety_note"] == "Gemini guidance is unavailable right now."
+    assert body["should_do"]
+    assert body["avoid"]
+    assert body["unavailable_reason"] == "Gemini is not configured on this backend."
 
 
 def test_ai_status_reports_google_ai_configuration(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

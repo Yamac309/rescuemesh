@@ -1,11 +1,11 @@
 [
-  {"name": "Library", "category": "Water", "latitude": 40.7136, "longitude": -74.0052},
-  {"name": "Student Center", "category": "Charging", "latitude": 40.7116, "longitude": -74.0044},
-  {"name": "Gym", "category": "First Aid", "latitude": 40.7150, "longitude": -74.0039},
-  {"name": "Health Center", "category": "First Aid", "latitude": 40.7142, "longitude": -74.0028},
-  {"name": "Police Station", "category": "General Update", "latitude": 40.7162, "longitude": -74.0066},
-  {"name": "Main Entrance", "category": "Blocked Road", "latitude": 40.7122, "longitude": -74.0082},
-  {"name": "Parking Lot 4", "category": "Dangerous Area", "latitude": 40.7109, "longitude": -74.0071},
-  {"name": "Shelter Area", "category": "Shelter", "latitude": 40.7130, "longitude": -74.0015},
-  {"name": "Dining Hall", "category": "Food", "latitude": 40.7124, "longitude": -74.0032}
+  {"name": "Library", "address": "100 Library Walk, RescueMesh Campus", "category": "Water", "latitude": 40.7136, "longitude": -74.0052},
+  {"name": "Student Center", "address": "220 Student Center Plaza, RescueMesh Campus", "category": "Charging", "latitude": 40.7116, "longitude": -74.0044},
+  {"name": "Gym", "address": "55 Athletics Drive, RescueMesh Campus", "category": "First Aid", "latitude": 40.7150, "longitude": -74.0039},
+  {"name": "Health Center", "address": "18 Wellness Way, RescueMesh Campus", "category": "First Aid", "latitude": 40.7142, "longitude": -74.0028},
+  {"name": "Police Station", "address": "12 Safety Road, RescueMesh Campus", "category": "General Update", "latitude": 40.7162, "longitude": -74.0066},
+  {"name": "Main Entrance", "address": "1 Main Entrance Road, RescueMesh Campus", "category": "Blocked Road", "latitude": 40.7122, "longitude": -74.0082},
+  {"name": "Parking Lot 4", "address": "400 West Parking Loop, RescueMesh Campus", "category": "Dangerous Area", "latitude": 40.7109, "longitude": -74.0071},
+  {"name": "Shelter Area", "address": "75 Shelter Field Lane, RescueMesh Campus", "category": "Shelter", "latitude": 40.7130, "longitude": -74.0015},
+  {"name": "Dining Hall", "address": "31 Dining Hall Court, RescueMesh Campus", "category": "Food", "latitude": 40.7124, "longitude": -74.0032}
 ]

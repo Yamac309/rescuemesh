@@ -17,6 +17,7 @@ import {
   clearIgnoredReports,
   deleteAllReports as deleteAllLocalReports,
   deleteIgnoredReportIds,
+  deleteDemoReports as deleteLocalDemoReports,
   deleteQueuedAction,
   deleteReportsByIds,
   deleteReportsByTitles,
@@ -50,6 +51,14 @@ export function useReports() {
   const [demoTimeOffsetHours, setDemoTimeOffsetHoursState] = useState(() => getDemoTimeOffsetHours());
   const [verificationConfig, setVerificationConfig] = useState(null);
   const clearInProgressRef = useRef(false);
+  const reportsRef = useRef([]);
+  const syncPromiseRef = useRef(null);
+  const syncQueuedRef = useRef(false);
+  const syncPausedRef = useRef(false);
+
+  useEffect(() => {
+    reportsRef.current = reports;
+  }, [reports]);
 
   const visibleReports = useCallback(
     (candidateReports, ignoredIds = ignoredReportIds) => {
@@ -61,15 +70,16 @@ export function useReports() {
 
   const mergeIntoState = useCallback(async (incomingReports) => {
     if (clearInProgressRef.current) return;
+    const normalizedReports = incomingReports.map(normalizeReport);
+    await saveReports(normalizedReports);
+
     setReports((currentReports) => {
       if (clearInProgressRef.current) return [];
       const byId = new Map(currentReports.map((report) => [report.report_id, report]));
-      incomingReports.forEach((incoming) => {
-        const normalized = normalizeReport(incoming);
+      normalizedReports.forEach((normalized) => {
         byId.set(normalized.report_id, mergeReport(byId.get(normalized.report_id), normalized));
       });
       const merged = [...byId.values()];
-      saveReports(incomingReports).catch((error) => console.error("Unable to save reports locally", error));
       return visibleReports(merged);
     });
   }, [visibleReports]);
@@ -105,14 +115,20 @@ export function useReports() {
       return status;
     } catch {
       setBackendOnline(false);
-      setNodeStatus((current) => current || { backend_health: "ok", connected_clients: 0, total_reports: reports.length });
+      setNodeStatus((current) => current || { backend_health: "ok", connected_clients: 0, total_reports: reportsRef.current.length });
       return null;
     }
-  }, [reports.length]);
+  }, []);
 
   const replayQueuedActions = useCallback(async () => {
     const actions = await getQueuedActions();
+    const localReportIds = new Set((await getAllReports()).map((report) => report.report_id));
     for (const action of actions) {
+      if (!localReportIds.has(action.report_id)) {
+        await deleteQueuedAction(action.id);
+        continue;
+      }
+
       try {
         if (action.type === "confirm") {
           const updated = await confirmReport(action.report_id, action.device_id);
@@ -123,13 +139,17 @@ export function useReports() {
           await mergeIntoState([updated]);
         }
         await deleteQueuedAction(action.id);
-      } catch {
+      } catch (error) {
+        if (error.status === 404) {
+          await deleteQueuedAction(action.id);
+          continue;
+        }
         break;
       }
     }
   }, [mergeIntoState]);
 
-  const syncNow = useCallback(async () => {
+  const runSyncCycle = useCallback(async () => {
     if (clearInProgressRef.current) return;
     const localReports = await getAllReports();
     const knownIds = localReports.map((report) => report.report_id);
@@ -144,7 +164,6 @@ export function useReports() {
       const deletedIds = new Set(response.deleted_report_ids || []);
       const syncedLocal = localReports.map((report) => ({ ...report, sync_state: "synced" }));
       const activeSyncedLocal = syncedLocal.filter((report) => !deletedIds.has(report.report_id));
-      await saveReports([...activeSyncedLocal, ...response.missing_reports, ...response.accepted_reports]);
       await mergeIntoState([...activeSyncedLocal, ...response.missing_reports, ...response.accepted_reports]);
       await replayQueuedActions();
       await refreshNodeStatus();
@@ -156,6 +175,33 @@ export function useReports() {
     }
   }, [mergeIntoState, refreshNodeStatus, removeFromState, replayQueuedActions]);
 
+  const syncNow = useCallback(async () => {
+    if (clearInProgressRef.current) return null;
+    if (syncPausedRef.current) {
+      syncQueuedRef.current = true;
+      return null;
+    }
+
+    if (syncPromiseRef.current) {
+      syncQueuedRef.current = true;
+      return syncPromiseRef.current;
+    }
+
+    const runQueuedSyncs = async () => {
+      do {
+        syncQueuedRef.current = false;
+        if (!syncPausedRef.current) {
+          await runSyncCycle();
+        }
+      } while (syncQueuedRef.current && !syncPausedRef.current);
+    };
+
+    syncPromiseRef.current = runQueuedSyncs().finally(() => {
+      syncPromiseRef.current = null;
+    });
+    return syncPromiseRef.current;
+  }, [runSyncCycle]);
+
   useEffect(() => {
     syncNow();
     const interval = window.setInterval(syncNow, 30000);
@@ -165,12 +211,17 @@ export function useReports() {
   useEffect(() => {
     let socket;
     let retryTimer;
+    let stopped = false;
 
     function connect() {
+      if (stopped) return;
       try {
         socket = createSocket();
-        socket.onopen = () => setBackendOnline(true);
+        socket.onopen = () => {
+          if (!stopped) setBackendOnline(true);
+        };
         socket.onmessage = (event) => {
+          if (stopped) return;
           const message = JSON.parse(event.data);
           if (message.report) {
             mergeIntoState([message.report]);
@@ -180,31 +231,52 @@ export function useReports() {
           }
         };
         socket.onclose = () => {
+          if (stopped) return;
           setBackendOnline(false);
           retryTimer = window.setTimeout(connect, 5000);
         };
       } catch {
-        retryTimer = window.setTimeout(connect, 5000);
+        if (!stopped) retryTimer = window.setTimeout(connect, 5000);
       }
     }
 
     connect();
     return () => {
+      stopped = true;
       window.clearTimeout(retryTimer);
-      if (socket) socket.close();
+      if (socket) {
+        socket.onclose = null;
+        socket.close();
+      }
     };
   }, [mergeIntoState, removeFromState]);
 
   const createLocalReport = useCallback(
     async (report) => {
       const duplicate = findPossibleDuplicate(report, reports);
-      const locallyVerifiedReport = estimateLocalVerification({ ...report, sync_state: "pending" }, reports, verificationConfig);
+      const locallyVerifiedReport = estimateLocalVerification(
+        { ...report, sync_state: "pending" },
+        reports,
+        verificationConfig
+      );
       await saveReport(locallyVerifiedReport);
       await mergeIntoState([locallyVerifiedReport]);
       syncNow();
       return duplicate;
     },
     [mergeIntoState, reports, syncNow, verificationConfig]
+  );
+
+  const createLocalReports = useCallback(
+    async (nextReports) => {
+      const existingReports = reportsRef.current;
+      const locallyVerifiedReports = nextReports.map((report) =>
+        estimateLocalVerification({ ...report, sync_state: "pending" }, existingReports, verificationConfig)
+      );
+      await mergeIntoState(locallyVerifiedReports);
+      syncNow();
+    },
+    [mergeIntoState, syncNow, verificationConfig]
   );
 
   const confirmLocalReport = useCallback(
@@ -286,25 +358,44 @@ export function useReports() {
   );
 
   const removeDemoReports = useCallback(async () => {
-    const localDeletedIds = await deleteReportsByTitles(DEMO_REPORT_TITLES);
-    setReports((currentReports) => currentReports.filter((report) => !DEMO_REPORT_TITLES.includes(report.title)));
+    syncPausedRef.current = true;
+    syncQueuedRef.current = false;
+    if (syncPromiseRef.current) {
+      await syncPromiseRef.current.catch(() => {});
+    }
 
+    let localDeletedIds = [];
     try {
+      localDeletedIds = await deleteLocalDemoReports();
+      if (!localDeletedIds.length) {
+        localDeletedIds = await deleteReportsByTitles(DEMO_REPORT_TITLES);
+      }
+      const localDeleted = new Set(localDeletedIds);
+      setReports((currentReports) => currentReports.filter((report) => !localDeleted.has(report.report_id)));
       const response = await deleteDemoReports();
       await removeFromState(response.deleted_report_ids || []);
       await refreshNodeStatus();
     } catch {
       console.warn(`Removed ${localDeletedIds.length} local demo reports. Node cleanup will need a connection.`);
+    } finally {
+      syncPausedRef.current = false;
+      syncQueuedRef.current = false;
+      syncNow();
     }
-  }, [refreshNodeStatus, removeFromState]);
+  }, [refreshNodeStatus, removeFromState, syncNow]);
 
   const clearAllReports = useCallback(async () => {
     const localReportIds = reports.map((report) => report.report_id);
     let backendCleared = false;
     clearInProgressRef.current = true;
+    syncPausedRef.current = true;
+    syncQueuedRef.current = false;
+    if (syncPromiseRef.current) {
+      await syncPromiseRef.current.catch(() => {});
+    }
     setReports([]);
     setIgnoredReportIds([]);
-    setNodeStatus((current) => current ? { ...current, total_reports: 0 } : current);
+    setNodeStatus((current) => (current ? { ...current, total_reports: 0 } : current));
 
     try {
       await deleteAllLocalReports();
@@ -319,6 +410,8 @@ export function useReports() {
       console.warn(`Cleared ${localReportIds.length} local reports. Node cleanup will need a connection.`);
     } finally {
       clearInProgressRef.current = false;
+      syncPausedRef.current = false;
+      syncQueuedRef.current = false;
       if (backendCleared) {
         await syncNow();
       }
@@ -340,6 +433,7 @@ export function useReports() {
       nodeStatus,
       demoTimeOffsetHours,
       createLocalReport,
+      createLocalReports,
       confirmLocalReport,
       resolveLocalReport,
       responderVerifyLocalReport,
@@ -361,6 +455,7 @@ export function useReports() {
       nodeStatus,
       demoTimeOffsetHours,
       createLocalReport,
+      createLocalReports,
       confirmLocalReport,
       resolveLocalReport,
       responderVerifyLocalReport,

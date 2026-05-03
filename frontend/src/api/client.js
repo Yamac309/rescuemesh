@@ -28,7 +28,9 @@ async function request(path, options = {}) {
 
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(message || `Request failed: ${response.status}`);
+    const error = new Error(message || `Request failed: ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
 
   return response.json();
@@ -92,9 +94,20 @@ export function getVerificationConfig() {
   return request("/verification/config");
 }
 
-export function getIncidentGuidance(report) {
+export function geocodeLocation(query, options = {}) {
+  return request(`/geocode?query=${encodeURIComponent(query)}&limit=${options.limit || 5}`, {
+    signal: options.signal
+  });
+}
+
+export function getIncidentGuidance(report, options = {}) {
+  const confidenceScore = report.confidence_score ?? report.confidenceScore;
+  const verificationLabel = report.verification_label ?? report.verificationLabel;
+  const agingLabel = report.aging_label ?? report.agingLabel;
+
   return request("/ai/incident-guidance", {
     method: "POST",
+    signal: options.signal,
     body: JSON.stringify({
       title: report.title,
       category: report.category,
@@ -104,9 +117,9 @@ export function getIncidentGuidance(report) {
       timestamp: report.timestamp,
       latitude: report.latitude,
       longitude: report.longitude,
-      confidence_score: report.confidenceScore,
-      verification_label: report.verificationLabel,
-      aging_label: report.agingLabel
+      confidence_score: confidenceScore,
+      verification_label: verificationLabel,
+      aging_label: agingLabel
     })
   });
 }

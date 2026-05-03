@@ -1,19 +1,32 @@
 import { Download, Siren, Trash2 } from "lucide-react";
+import { useState } from "react";
 import NodeStatusCard from "../components/NodeStatusCard";
 import ReportCard from "../components/ReportCard";
 import { makeDemoReports } from "../utils/demoData";
 import { downloadFile, sourceTrustLabel, toCsv } from "../utils/reportUtils";
 
 export default function Dashboard({ mesh }) {
+  const [busyAction, setBusyAction] = useState(null);
   const highPriority = mesh.reports.filter((report) => ["High", "Critical"].includes(report.urgency) && report.status !== "Resolved");
   const openReports = mesh.reports.filter((report) => report.status !== "Resolved");
   const showDevelopmentActions = import.meta.env.DEV;
+  const controlsBusy = Boolean(busyAction);
+
+  async function runAction(actionName, action) {
+    if (busyAction) return;
+    setBusyAction(actionName);
+    try {
+      await action();
+    } finally {
+      setBusyAction(null);
+    }
+  }
 
   async function seedDemoData() {
-    const demoReports = makeDemoReports(mesh.deviceId);
-    for (const report of demoReports) {
-      await mesh.createLocalReport(report);
-    }
+    await runAction("load-demo", async () => {
+      await mesh.removeDemoReports();
+      await mesh.createLocalReports(makeDemoReports(mesh.deviceId));
+    });
   }
 
   function exportJson() {
@@ -32,7 +45,7 @@ export default function Dashboard({ mesh }) {
   function clearAllReports() {
     const confirmed = window.confirm("Clear all reports from this browser and the shared RescueMesh Node?");
     if (confirmed) {
-      mesh.clearAllReports();
+      runAction("clear-all", mesh.clearAllReports);
     }
   }
 
@@ -49,14 +62,14 @@ export default function Dashboard({ mesh }) {
         <div className="hero-actions">
           {showDevelopmentActions && (
             <>
-              <button className="secondary" onClick={seedDemoData}>
-                <Siren size={18} /> Load Demo Data
+              <button className="secondary" onClick={seedDemoData} disabled={controlsBusy}>
+                <Siren size={18} /> {busyAction === "load-demo" ? "Loading..." : "Load Demo Data"}
               </button>
-              <button className="secondary danger" onClick={mesh.removeDemoReports}>
-                <Trash2 size={18} /> Remove Demo Data
+              <button className="secondary danger" onClick={() => runAction("remove-demo", mesh.removeDemoReports)} disabled={controlsBusy}>
+                <Trash2 size={18} /> {busyAction === "remove-demo" ? "Removing..." : "Remove Demo Data"}
               </button>
-              <button className="secondary danger" onClick={clearAllReports} disabled={!mesh.reports.length}>
-                <Trash2 size={18} /> Clear All Reports
+              <button className="secondary danger" onClick={clearAllReports} disabled={controlsBusy || !mesh.reports.length}>
+                <Trash2 size={18} /> {busyAction === "clear-all" ? "Clearing..." : "Clear All Reports"}
               </button>
               <div className="demo-time-control">
                 <label>
