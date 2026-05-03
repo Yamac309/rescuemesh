@@ -28,32 +28,44 @@ function confidenceMatches(report, reports, range) {
   return score >= min && score <= max;
 }
 
+const DEFAULT_FILTERS = {
+  category: "All",
+  urgency: "All",
+  status: "All",
+  verification: "All",
+  confidence: "All",
+  aging: "All",
+  needsReview: false,
+  suspicious: false,
+  responderVerified: false,
+  stale: false,
+};
+
 export default function MapPage({ mesh }) {
-  const [filters, setFilters] = useState({
-    category: "All",
-    urgency: "All",
-    status: "All",
-    verification: "All",
-    confidence: "All",
-    aging: "All",
-    needsReview: false,
-    suspicious: false,
-    responderVerified: false,
-    stale: false
-  });
-  const filteredReports = useMemo(() => applyFilters(mesh.reports, filters), [mesh.reports, filters]);
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+
+  const filteredReports = useMemo(
+    () => applyFilters(mesh.reports, filters),
+    [mesh.reports, filters]
+  );
 
   return (
     <div className="page-grid">
       <section className="section-header">
         <div>
           <p className="eyebrow">Shared operating picture</p>
-          <h1>Emergency Map</h1>
+          <h1>Map</h1>
         </div>
+        <span className="map-report-count">
+          {filteredReports.length} of {mesh.reports.length} reports
+        </span>
       </section>
+
       <ReportFilters filters={filters} onChange={setFilters} />
+
       <div className="map-layout">
         <ReportMap reports={filteredReports} allReports={mesh.reports} />
+
         <aside className="map-list">
           {filteredReports.map((report) => (
             <ReportCard
@@ -69,7 +81,9 @@ export default function MapPage({ mesh }) {
               compact
             />
           ))}
-          {!filteredReports.length && <p className="empty-state">No reports match these filters.</p>}
+          {!filteredReports.length && (
+            <p className="empty-state">No reports match these filters.</p>
+          )}
         </aside>
       </div>
     </div>

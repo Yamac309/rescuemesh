@@ -15,7 +15,7 @@ const initialForm = {
   latitude: "",
   longitude: "",
   status: "Unverified",
-  photoEvidenceAttached: false
+  photoEvidenceAttached: false,
 };
 
 export default function ReportForm({ deviceId, reports = [], onSubmit }) {
@@ -26,21 +26,21 @@ export default function ReportForm({ deviceId, reports = [], onSubmit }) {
   const [locationLoading, setLocationLoading] = useState(false);
 
   function updateField(field, value) {
-    setForm((current) => ({ ...current, [field]: value }));
+    setForm((cur) => ({ ...cur, [field]: value }));
   }
 
   function applyLocationSuggestion(suggestion) {
-    setForm((current) => ({
-      ...current,
+    setForm((cur) => ({
+      ...cur,
       locationQuery: suggestion.address || suggestion.name,
       locationName: suggestion.name || suggestion.address,
       locationAddress: suggestion.address || "",
       latitude: Number(suggestion.latitude).toFixed(6),
-      longitude: Number(suggestion.longitude).toFixed(6)
+      longitude: Number(suggestion.longitude).toFixed(6),
     }));
     setLocationResults([]);
     setMessageTone("success");
-    setMessage(`Location set to ${suggestion.name || "selected place"}. Coordinates are still editable below.`);
+    setMessage(`Location set to ${suggestion.name || "selected place"}.`);
   }
 
   async function runLocationSearch(query, options = {}) {
@@ -49,30 +49,32 @@ export default function ReportForm({ deviceId, reports = [], onSubmit }) {
       setLocationResults([]);
       if (showMessages) {
         setMessageTone("warning");
-        setMessage("Type a place, address, or campus location before searching.");
+        setMessage("Type a place, address, or location before searching.");
       }
       return;
     }
-
     setLocationLoading(true);
     if (showMessages) {
       setMessageTone("info");
-      setMessage("Searching for that location...");
+      setMessage("Searching...");
     }
-
     try {
       const results = await geocodeLocation(query, { signal });
       setLocationResults(results);
       if (showMessages) {
         setMessageTone(results.length ? "info" : "warning");
-        setMessage(results.length ? "Choose the matching location below." : "No matching location found. You can still enter coordinates manually.");
+        setMessage(
+          results.length
+            ? "Choose the matching location below."
+            : "No matching location found. You can enter coordinates manually."
+        );
       }
     } catch (error) {
       if (error.name === "AbortError") return;
       setLocationResults([]);
       if (showMessages) {
         setMessageTone("warning");
-        setMessage("Location search is unavailable right now. Enter coordinates manually or use current location.");
+        setMessage("Location search unavailable. Enter coordinates manually or use current location.");
       }
     } finally {
       setLocationLoading(false);
@@ -87,17 +89,14 @@ export default function ReportForm({ deviceId, reports = [], onSubmit }) {
   useEffect(() => {
     const query = form.locationQuery.trim();
     const selectedQuery = form.locationAddress || form.locationName;
-
     if (query.length < 2 || (selectedQuery && query === selectedQuery)) {
       setLocationResults([]);
       return undefined;
     }
-
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       runLocationSearch(query, { signal: controller.signal });
     }, 350);
-
     return () => {
       window.clearTimeout(timer);
       controller.abort();
@@ -107,41 +106,34 @@ export default function ReportForm({ deviceId, reports = [], onSubmit }) {
   function useCurrentLocation() {
     if (!navigator.geolocation) {
       setMessageTone("warning");
-      setMessage("This browser does not support device location. Enter the incident coordinates manually.");
+      setMessage("This browser does not support device location. Enter coordinates manually.");
       return;
     }
-
     setMessageTone("info");
-    setMessage("Requesting your real device location...");
-
+    setMessage("Requesting device location...");
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setForm((current) => ({
-          ...current,
+        setForm((cur) => ({
+          ...cur,
           locationName: "Current device location",
-          locationQuery: current.locationQuery || "Current device location",
+          locationQuery: cur.locationQuery || "Current device location",
           locationAddress: "",
           latitude: position.coords.latitude.toFixed(6),
-          longitude: position.coords.longitude.toFixed(6)
+          longitude: position.coords.longitude.toFixed(6),
         }));
         setLocationResults([]);
         setMessageTone("success");
-        setMessage("Real device location filled from your browser. Coordinates are still editable below.");
+        setMessage("Location filled from device. Coordinates are still editable.");
       },
       (error) => {
-        const permissionDenied = error.code === error.PERMISSION_DENIED;
         setMessageTone("warning");
         setMessage(
-          permissionDenied
-            ? "Location permission was denied. Allow location access in the browser or enter coordinates manually."
-            : "The browser could not get a real device location. Enter the incident coordinates manually."
+          error.code === error.PERMISSION_DENIED
+            ? "Location permission denied. Allow access or enter coordinates manually."
+            : "Could not get device location. Enter coordinates manually."
         );
       },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 0,
-        timeout: 10000
-      }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
     );
   }
 
@@ -166,17 +158,17 @@ export default function ReportForm({ deviceId, reports = [], onSubmit }) {
       photo_evidence_attached: form.photoEvidenceAttached,
       confirmation_count: 0,
       confirmed_by_device_ids: [],
-      sync_state: "pending"
+      sync_state: "pending",
     };
 
     const possibleDuplicate = findPossibleDuplicate(report, reports);
     if (possibleDuplicate) {
       const shouldContinue = window.confirm(
-        `This looks similar to another report: "${possibleDuplicate.title}". Are you sure you want to create a new report?`
+        `This looks similar to: "${possibleDuplicate.title}". Create a new report anyway?`
       );
       if (!shouldContinue) {
         setMessageTone("info");
-        setMessage("Report was not saved. You can update the details or confirm the existing report instead.");
+        setMessage("Report not saved. You can update details or confirm the existing report.");
         return;
       }
     }
@@ -187,82 +179,93 @@ export default function ReportForm({ deviceId, reports = [], onSubmit }) {
       setMessageTone(duplicate ? "warning" : "success");
       setMessage(
         duplicate
-          ? `This may be a duplicate of an existing report: "${duplicate.title}". The report was still saved.`
+          ? `Possible duplicate of "${duplicate.title}". Report was still saved.`
           : "Report saved and added to the dashboard."
       );
     } catch (error) {
       console.error("Unable to create report", error);
       setMessageTone("warning");
-      setMessage("The report could not be saved. Check the required fields and try again.");
+      setMessage("Could not save report. Check required fields and try again.");
     }
   }
 
   return (
     <form className="report-form" onSubmit={handleSubmit}>
       {message && <div className={`notice ${messageTone}`}>{message}</div>}
+
+      {/* -- Core fields -- */}
       <label>
         Title
-        <input value={form.title} onChange={(event) => updateField("title", event.target.value)} required maxLength={120} />
+        <input
+          value={form.title}
+          onChange={(e) => updateField("title", e.target.value)}
+          placeholder="Brief, descriptive incident title"
+          required
+          maxLength={120}
+        />
       </label>
+
       <div className="form-grid">
         <label>
           Category
-          <select value={form.category} onChange={(event) => updateField("category", event.target.value)}>
-            {CATEGORIES.map((category) => (
-              <option key={category} value={category}>
-                {category}
-              </option>
-            ))}
+          <select value={form.category} onChange={(e) => updateField("category", e.target.value)}>
+            {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </label>
         <label>
           Urgency
-          <select value={form.urgency} onChange={(event) => updateField("urgency", event.target.value)}>
-            {URGENCY_LEVELS.map((urgency) => (
-              <option key={urgency} value={urgency}>
-                {urgency}
-              </option>
-            ))}
+          <select value={form.urgency} onChange={(e) => updateField("urgency", e.target.value)}>
+            {URGENCY_LEVELS.map((u) => <option key={u} value={u}>{u}</option>)}
           </select>
         </label>
         <label>
           Status
-          <select value={form.status} onChange={(event) => updateField("status", event.target.value)}>
-            {STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {status}
-              </option>
-            ))}
+          <select value={form.status} onChange={(e) => updateField("status", e.target.value)}>
+            {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </label>
       </div>
+
       <label>
         Description
-        <textarea value={form.description} onChange={(event) => updateField("description", event.target.value)} rows={5} />
+        <textarea
+          value={form.description}
+          onChange={(e) => updateField("description", e.target.value)}
+          placeholder="What is happening? Include any relevant details."
+          rows={4}
+        />
       </label>
+
+      {/* -- Location -- */}
+      <div className="form-section-divider">Location</div>
+
       <div className="location-search-block">
         <label>
           Incident location
           <div className="location-search-row">
             <input
               value={form.locationQuery}
-              onChange={(event) => {
-                updateField("locationQuery", event.target.value);
+              onChange={(e) => {
+                updateField("locationQuery", e.target.value);
                 updateField("locationName", "");
                 updateField("locationAddress", "");
               }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") searchLocation(event);
-              }}
-              placeholder="Search an address, place, or known location"
+              onKeyDown={(e) => { if (e.key === "Enter") searchLocation(e); }}
+              placeholder="Search address, place, or landmark"
             />
-            <button type="button" className="secondary" onClick={searchLocation} disabled={locationLoading}>
-              <Search size={18} /> {locationLoading ? "Searching..." : "Find"}
+            <button
+              type="button"
+              className="secondary"
+              onClick={searchLocation}
+              disabled={locationLoading}
+            >
+              <Search size={16} /> {locationLoading ? "Searching..." : "Search"}
             </button>
           </div>
         </label>
+
         {locationResults.length > 0 && (
-          <div className="location-results" aria-label="Location search results">
+          <div className="location-results" aria-label="Location results">
             {locationResults.map((result) => (
               <button
                 type="button"
@@ -270,41 +273,77 @@ export default function ReportForm({ deviceId, reports = [], onSubmit }) {
                 key={`${result.source}-${result.latitude}-${result.longitude}-${result.name}`}
                 onClick={() => applyLocationSuggestion(result)}
               >
-                <MapPin size={17} />
+                <MapPin size={15} />
                 <span>
                   <strong>{result.name}</strong>
-                  <small>{result.address || `${Number(result.latitude).toFixed(5)}, ${Number(result.longitude).toFixed(5)}`}</small>
+                  <small>
+                    {result.address ||
+                      `${Number(result.latitude).toFixed(5)}, ${Number(result.longitude).toFixed(5)}`}
+                  </small>
                 </span>
               </button>
             ))}
           </div>
         )}
       </div>
+
       <div className="coordinate-row">
         <label>
           Latitude
-          <input type="number" step="any" min="-90" max="90" value={form.latitude} onChange={(event) => updateField("latitude", event.target.value)} required />
+          <input
+            type="number"
+            step="any"
+            min="-90"
+            max="90"
+            value={form.latitude}
+            onChange={(e) => updateField("latitude", e.target.value)}
+            placeholder="e.g. 37.7749"
+            required
+          />
         </label>
         <label>
           Longitude
-          <input type="number" step="any" min="-180" max="180" value={form.longitude} onChange={(event) => updateField("longitude", event.target.value)} required />
+          <input
+            type="number"
+            step="any"
+            min="-180"
+            max="180"
+            value={form.longitude}
+            onChange={(e) => updateField("longitude", e.target.value)}
+            placeholder="e.g. -122.4194"
+            required
+          />
         </label>
-        <button type="button" className="icon-button" onClick={useCurrentLocation} title="Use current location">
-          <LocateFixed size={20} />
+        <button
+          type="button"
+          className="icon-button"
+          onClick={useCurrentLocation}
+          title="Use current device location"
+        >
+          <LocateFixed size={18} />
         </button>
       </div>
-      <p className="field-help">Coordinates are the incident location. Use the location button only when the report is about where this device is right now.</p>
+      <p className="field-help">
+        Coordinates mark the incident location, not necessarily your current position.
+      </p>
+
+      {/* -- Evidence -- */}
+      <div className="form-section-divider">Evidence</div>
+
       <label className="checkbox-row">
         <input
           type="checkbox"
           checked={form.photoEvidenceAttached}
-          onChange={(event) => updateField("photoEvidenceAttached", event.target.checked)}
+          onChange={(e) => updateField("photoEvidenceAttached", e.target.checked)}
         />
         Photo evidence attached
       </label>
-      <p className="field-help">MVP note: this stores a yes/no evidence flag. TODO: add real image upload, metadata checks, and privacy review.</p>
+      <p className="field-help">
+        MVP: stores a yes/no flag. Image upload with metadata and privacy review coming later.
+      </p>
+
       <button type="submit" className="primary">
-        Save Emergency Report
+        Save Report
       </button>
     </form>
   );

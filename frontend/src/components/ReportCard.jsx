@@ -24,6 +24,8 @@ export default function ReportCard({
   const confidence = calculateConfidence(report, allReports);
   const verificationLabel = getVerificationLabel(report, allReports);
   const ageClass = `age-${freshness.label.toLowerCase()}`;
+  const isResolved = report.status === "Resolved";
+  const isCritical = report.urgency === "Critical";
 
   function confirmIgnore() {
     const shouldIgnore = window.confirm(
@@ -35,9 +37,9 @@ export default function ReportCard({
   }
 
   return (
-    <article className={`report-card ${compact ? "compact" : ""} ${ageClass}`}>
+    <article className={`report-card ${compact ? "compact" : ""} ${ageClass}${isResolved ? " resolved" : ""}`}>
       <div className="report-card-header">
-        <div>
+        <div className="report-card-title">
           <p className="eyebrow">{report.category}</p>
           <h3>{report.title}</h3>
         </div>
@@ -46,54 +48,69 @@ export default function ReportCard({
           <AgingBadge report={report} />
         </div>
       </div>
+
       <div className="verification-row">
         <ConfidenceBadge report={report} allReports={allReports} />
         <TrustSourceBadge report={report} />
       </div>
-      {!compact && <p className="description">{report.description}</p>}
+
+      {!compact && report.description && (
+        <p className="description">{report.description}</p>
+      )}
+
       <div className="meta-grid">
         {report.locationName && (
-          <span>
-            <MapPin size={15} /> {report.locationName}
-          </span>
+          <span><MapPin size={13} /> {report.locationName}</span>
         )}
-        {report.locationAddress && (
-          <span>
-            <MapPin size={15} /> {report.locationAddress}
-          </span>
+        {report.locationAddress && !report.locationName && (
+          <span><MapPin size={13} /> {report.locationAddress}</span>
         )}
         <span>
-          <MapPin size={15} /> {Number(report.latitude).toFixed(4)}, {Number(report.longitude).toFixed(4)}
+          <MapPin size={13} />
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: "0.75rem" }}>
+            {Number(report.latitude).toFixed(4)}, {Number(report.longitude).toFixed(4)}
+          </span>
         </span>
-        <span>
-          <ShieldCheck size={15} /> {report.status === "Resolved" ? "Resolved" : verificationLabel}
-        </span>
-        <span>
-          <CheckCircle2 size={15} /> {report.confirmation_count || 0} confirmations
-        </span>
-        <span>
-          <Gauge size={15} /> Confidence: {confidence}%
-        </span>
-        <span>
-          <Timer size={15} /> Age: {freshness.label}
-        </span>
+        <span><ShieldCheck size={13} /> {isResolved ? "Resolved" : verificationLabel}</span>
+        <span><CheckCircle2 size={13} /> {report.confirmation_count || 0} confirmation{report.confirmation_count !== 1 ? "s" : ""}</span>
+        <span><Gauge size={13} /> Confidence: {confidence}%</span>
+        <span><Timer size={13} /> Age: {freshness.label}</span>
       </div>
+
       {!compact && <AiIncidentGuidance report={report} />}
       {!compact && <VerificationDetails report={report} />}
-      {!compact && onAddComment && <ReportComments report={report} comments={comments} deviceId={deviceId} onAddComment={onAddComment} />}
-      <p className="timestamp">{new Date(report.timestamp).toLocaleString()}</p>
-      <div className="card-actions">
-        <button className="secondary" onClick={() => onConfirm(report.report_id)} disabled={alreadyConfirmed || report.status === "Resolved"}>
-          {alreadyConfirmed ? "Confirmed by you" : "Confirm"}
-        </button>
-        <button className="secondary danger" onClick={() => onResolve(report.report_id)} disabled={report.status === "Resolved"}>
-          Mark Resolved
-        </button>
-        {onIgnore && (
-          <button className="secondary" onClick={confirmIgnore}>
-            <EyeOff size={16} /> Ignore
+      {!compact && onAddComment && (
+        <ReportComments
+          report={report}
+          comments={comments}
+          deviceId={deviceId}
+          onAddComment={onAddComment}
+        />
+      )}
+
+      <div className="report-card-footer">
+        <span className="timestamp">{new Date(report.timestamp).toLocaleString()}</span>
+        <div className="card-actions">
+          <button
+            className="secondary"
+            onClick={() => onConfirm(report.report_id)}
+            disabled={alreadyConfirmed || isResolved}
+          >
+            {alreadyConfirmed ? "Confirmed" : "Confirm"}
           </button>
-        )}
+          <button
+            className="secondary danger"
+            onClick={() => onResolve(report.report_id)}
+            disabled={isResolved}
+          >
+            {isResolved ? "Resolved" : "Resolve"}
+          </button>
+          {onIgnore && (
+            <button className="secondary" onClick={confirmIgnore}>
+              <EyeOff size={14} /> Ignore
+            </button>
+          )}
+        </div>
       </div>
     </article>
   );

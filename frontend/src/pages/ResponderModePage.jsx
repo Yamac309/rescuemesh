@@ -1,9 +1,18 @@
 import { useMemo, useState } from "react";
 import ReportCard from "../components/ReportCard";
 import ResponderActions from "../components/ResponderActions";
-import { calculateConfidence, getFreshness, getVerificationLabel } from "../utils/reportUtils";
+import { calculateConfidence, getVerificationLabel } from "../utils/reportUtils";
 
-const RESPONDER_FILTERS = ["Needs Review", "Critical", "Low Trust", "Unverified", "Likely Verified", "Verified", "Resolved", "Suspicious"];
+const RESPONDER_FILTERS = [
+  "Needs Review",
+  "Critical",
+  "Low Trust",
+  "Unverified",
+  "Likely Verified",
+  "Verified",
+  "Resolved",
+  "Suspicious",
+];
 
 function matchesFilter(report, filter, reports) {
   const label = getVerificationLabel(report, reports);
@@ -19,8 +28,9 @@ function matchesFilter(report, filter, reports) {
 
 export default function ResponderModePage({ mesh }) {
   const [filter, setFilter] = useState("Needs Review");
+
   const filteredReports = useMemo(
-    () => mesh.reports.filter((report) => matchesFilter(report, filter, mesh.reports)),
+    () => mesh.reports.filter((r) => matchesFilter(r, filter, mesh.reports)),
     [filter, mesh.reports]
   );
 
@@ -31,20 +41,23 @@ export default function ResponderModePage({ mesh }) {
           <p className="eyebrow">Responder review</p>
           <h1>Responder Mode</h1>
         </div>
+        <span className="responder-queue-count">
+          {filteredReports.length} in queue
+        </span>
       </section>
+
       <div className="filters responder-filter-row">
         <label>
-          Review Queue
-          <select value={filter} onChange={(event) => setFilter(event.target.value)}>
+          Review queue
+          <select value={filter} onChange={(e) => setFilter(e.target.value)}>
             <option value="All">All reports</option>
             {RESPONDER_FILTERS.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
+              <option key={item} value={item}>{item}</option>
             ))}
           </select>
         </label>
       </div>
+
       <div className="responder-list">
         {filteredReports.map((report) => (
           <div className="responder-review" key={report.report_id}>
@@ -67,7 +80,9 @@ export default function ResponderModePage({ mesh }) {
             />
           </div>
         ))}
-        {!filteredReports.length && <p className="empty-state">No reports match this responder filter.</p>}
+        {!filteredReports.length && (
+          <p className="empty-state">No reports match this filter.</p>
+        )}
       </div>
     </div>
   );

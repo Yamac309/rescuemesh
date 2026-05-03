@@ -9,14 +9,20 @@ export default function TimelinePage({ reports }) {
       <section className="section-header">
         <div>
           <p className="eyebrow">Chronological incident feed</p>
-          <h1>Emergency Timeline</h1>
+          <h1>Timeline</h1>
         </div>
+        <span className="timeline-count">
+          {timeline.length} {timeline.length === 1 ? "entry" : "entries"}
+        </span>
       </section>
+
       <div className="timeline">
         {timeline.map((report) => (
           <TimelineItem key={report.report_id} report={report} allReports={reports} />
         ))}
-        {!timeline.length && <p className="empty-state">No timeline entries yet.</p>}
+        {!timeline.length && (
+          <p className="empty-state">No timeline entries yet. Create a report to get started.</p>
+        )}
       </div>
     </div>
   );
