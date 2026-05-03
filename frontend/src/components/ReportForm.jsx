@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LocateFixed, MapPin, Search } from "lucide-react";
 import { geocodeLocation } from "../api/client";
 import { CATEGORIES, STATUSES, URGENCY_LEVELS } from "../utils/constants";
@@ -43,36 +43,66 @@ export default function ReportForm({ deviceId, reports = [], onSubmit }) {
     setMessage(`Location set to ${suggestion.name || "selected place"}. Coordinates are still editable below.`);
   }
 
-  async function searchLocation(event) {
-    event?.preventDefault();
-    const query = form.locationQuery.trim();
+  async function runLocationSearch(query, options = {}) {
+    const { signal, showMessages = false } = options;
     if (query.length < 2) {
-      setMessageTone("warning");
-      setMessage("Type a place, address, or campus location before searching.");
+      setLocationResults([]);
+      if (showMessages) {
+        setMessageTone("warning");
+        setMessage("Type a place, address, or campus location before searching.");
+      }
       return;
     }
 
     setLocationLoading(true);
-    setMessageTone("info");
-    setMessage("Searching for that location...");
+    if (showMessages) {
+      setMessageTone("info");
+      setMessage("Searching for that location...");
+    }
 
     try {
-      const results = await geocodeLocation(query);
+      const results = await geocodeLocation(query, { signal });
       setLocationResults(results);
-      if (results.length === 1) {
-        applyLocationSuggestion(results[0]);
-        return;
+      if (showMessages) {
+        setMessageTone(results.length ? "info" : "warning");
+        setMessage(results.length ? "Choose the matching location below." : "No matching location found. You can still enter coordinates manually.");
       }
-      setMessageTone(results.length ? "info" : "warning");
-      setMessage(results.length ? "Choose the matching location below." : "No matching location found. You can still enter coordinates manually.");
-    } catch {
+    } catch (error) {
+      if (error.name === "AbortError") return;
       setLocationResults([]);
-      setMessageTone("warning");
-      setMessage("Location search is unavailable right now. Enter coordinates manually or use current location.");
+      if (showMessages) {
+        setMessageTone("warning");
+        setMessage("Location search is unavailable right now. Enter coordinates manually or use current location.");
+      }
     } finally {
       setLocationLoading(false);
     }
   }
+
+  async function searchLocation(event) {
+    event?.preventDefault();
+    await runLocationSearch(form.locationQuery.trim(), { showMessages: true });
+  }
+
+  useEffect(() => {
+    const query = form.locationQuery.trim();
+    const selectedQuery = form.locationAddress || form.locationName;
+
+    if (query.length < 2 || (selectedQuery && query === selectedQuery)) {
+      setLocationResults([]);
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      runLocationSearch(query, { signal: controller.signal });
+    }, 350);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [form.locationAddress, form.locationName, form.locationQuery]);
 
   function useCurrentLocation() {
     if (!navigator.geolocation) {

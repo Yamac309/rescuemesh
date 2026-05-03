@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 Category = Literal[
@@ -77,9 +77,18 @@ class ConfirmRequest(BaseModel):
 class CommentBase(BaseModel):
     comment_id: str = Field(min_length=8)
     report_id: str = Field(min_length=8)
-    body: str = Field(min_length=1, max_length=1000)
+    body: str = Field(default="", max_length=1000)
+    image_data_url: str = Field(default="", max_length=2_500_000)
     device_id: str = Field(min_length=4)
     timestamp: str
+
+    @model_validator(mode="after")
+    def require_text_or_image(self):
+        if not self.body.strip() and not self.image_data_url:
+            raise ValueError("Comment must include text or an image")
+        if self.image_data_url and not self.image_data_url.startswith("data:image/"):
+            raise ValueError("Comment image must be a data URL")
+        return self
 
 
 class CommentCreate(CommentBase):

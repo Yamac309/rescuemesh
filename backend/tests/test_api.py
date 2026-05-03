@@ -92,6 +92,7 @@ def test_report_comments_can_be_created_and_listed(client: TestClient) -> None:
         "comment_id": "comment-local-1",
         "report_id": "local-report-1",
         "body": "Road access is still clear from the south side.",
+        "image_data_url": "",
         "device_id": "device-beta",
         "timestamp": "2026-05-01T12:05:00Z",
     }
@@ -103,6 +104,23 @@ def test_report_comments_can_be_created_and_listed(client: TestClient) -> None:
     assert created.json()["body"] == comment["body"]
     assert listed.status_code == 200
     assert listed.json() == [comment]
+
+
+def test_report_comments_can_include_pasted_image_data(client: TestClient) -> None:
+    client.post("/reports", json=sample_report())
+    comment = {
+        "comment_id": "comment-image-1",
+        "report_id": "local-report-1",
+        "body": "",
+        "image_data_url": "data:image/png;base64,iVBORw0KGgo=",
+        "device_id": "device-beta",
+        "timestamp": "2026-05-01T12:05:00Z",
+    }
+
+    created = client.post("/reports/local-report-1/comments", json=comment)
+
+    assert created.status_code == 201
+    assert created.json()["image_data_url"].startswith("data:image/png")
 
 
 def test_comment_requires_matching_report_id(client: TestClient) -> None:
@@ -179,6 +197,15 @@ def test_geocode_returns_known_locations_without_remote_lookup(client: TestClien
     assert body[0]["source"] == "known-location"
     assert body[0]["address"] == "100 Library Walk, RescueMesh Campus"
     assert body[0]["latitude"] == 40.7136
+
+
+def test_geocode_returns_usf_for_broad_campus_query(client: TestClient) -> None:
+    response = client.get("/geocode", params={"query": "USF"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body[0]["name"] == "University of South Florida"
+    assert body[0]["source"] == "known-location"
 
 
 def test_public_mode_requires_admin_token_for_delete(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

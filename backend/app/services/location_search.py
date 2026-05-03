@@ -8,6 +8,16 @@ from app.services.location_checks import get_known_locations
 
 
 NOMINATIM_ENDPOINT = "https://nominatim.openstreetmap.org/search"
+LOCAL_PLACE_ALIASES = [
+    {
+        "name": "University of South Florida",
+        "address": "University of South Florida, 4202 East Fowler Avenue, Tampa, FL 33620",
+        "latitude": 28.0599999,
+        "longitude": -82.4138362,
+        "source": "known-location",
+        "keywords": ["usf", "university of south florida", "usf tampa", "south florida university"],
+    }
+]
 
 
 def _known_location_suggestions(query: str, limit: int) -> list[dict]:
@@ -16,6 +26,21 @@ def _known_location_suggestions(query: str, limit: int) -> list[dict]:
         return []
 
     suggestions: list[dict] = []
+    for place in LOCAL_PLACE_ALIASES:
+        haystack = f"{place['name']} {place['address']} {' '.join(place['keywords'])}".lower()
+        if normalized_query in haystack:
+            suggestions.append(
+                {
+                    "name": place["name"],
+                    "address": place["address"],
+                    "latitude": place["latitude"],
+                    "longitude": place["longitude"],
+                    "source": place["source"],
+                }
+            )
+        if len(suggestions) >= limit:
+            return suggestions
+
     for location in get_known_locations():
         haystack = f"{location['name']} {location.get('category', '')}".lower()
         if normalized_query in haystack:

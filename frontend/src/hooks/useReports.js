@@ -430,11 +430,12 @@ export function useReports() {
   );
 
   const addCommentToReport = useCallback(
-    async (reportId, body) => {
+    async (reportId, body, imageDataUrl = "") => {
       const comment = {
         comment_id: `comment-${deviceId}-${Date.now()}-${crypto.randomUUID()}`,
         report_id: reportId,
         body,
+        image_data_url: imageDataUrl,
         device_id: deviceId,
         timestamp: new Date().toISOString()
       };

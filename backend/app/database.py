@@ -101,12 +101,16 @@ def init_db() -> None:
                 comment_id TEXT PRIMARY KEY,
                 report_id TEXT NOT NULL,
                 body TEXT NOT NULL,
+                image_data_url TEXT DEFAULT '',
                 device_id TEXT NOT NULL,
                 timestamp TEXT NOT NULL,
                 FOREIGN KEY (report_id) REFERENCES reports(report_id)
             )
             """
         )
+        existing_comment_columns = {row["name"] for row in db.execute("PRAGMA table_info(comments)").fetchall()}
+        if "image_data_url" not in existing_comment_columns:
+            db.execute("ALTER TABLE comments ADD COLUMN image_data_url TEXT DEFAULT ''")
 
 
 def _json_loads(value: str | None, fallback):
@@ -220,6 +224,7 @@ def row_to_comment(row: sqlite3.Row) -> dict:
         "comment_id": row["comment_id"],
         "report_id": row["report_id"],
         "body": row["body"],
+        "image_data_url": row["image_data_url"] or "",
         "device_id": row["device_id"],
         "timestamp": row["timestamp"],
     }
@@ -229,7 +234,7 @@ def get_comments(report_id: str) -> list[dict]:
     with get_connection() as db:
         rows = db.execute(
             """
-            SELECT comment_id, report_id, body, device_id, timestamp
+            SELECT comment_id, report_id, body, image_data_url, device_id, timestamp
             FROM comments
             WHERE report_id = ?
             ORDER BY timestamp ASC
@@ -248,7 +253,7 @@ def insert_comment(comment: CommentCreate) -> tuple[bool, dict | None]:
         if existing:
             row = db.execute(
                 """
-                SELECT comment_id, report_id, body, device_id, timestamp
+                SELECT comment_id, report_id, body, image_data_url, device_id, timestamp
                 FROM comments
                 WHERE comment_id = ?
                 """,
@@ -257,16 +262,24 @@ def insert_comment(comment: CommentCreate) -> tuple[bool, dict | None]:
             return False, row_to_comment(row)
         db.execute(
             """
-            INSERT INTO comments (comment_id, report_id, body, device_id, timestamp)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO comments (comment_id, report_id, body, image_data_url, device_id, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (comment.comment_id, comment.report_id, comment.body, comment.device_id, comment.timestamp),
+            (
+                comment.comment_id,
+                comment.report_id,
+                comment.body,
+                comment.image_data_url,
+                comment.device_id,
+                comment.timestamp,
+            ),
         )
         db.commit()
     return True, {
         "comment_id": comment.comment_id,
         "report_id": comment.report_id,
         "body": comment.body,
+        "image_data_url": comment.image_data_url,
         "device_id": comment.device_id,
         "timestamp": comment.timestamp,
     }
