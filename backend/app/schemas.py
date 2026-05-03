@@ -74,8 +74,28 @@ class ConfirmRequest(BaseModel):
     device_id: str = Field(min_length=4)
 
 
+class CommentBase(BaseModel):
+    comment_id: str = Field(min_length=8)
+    report_id: str = Field(min_length=8)
+    body: str = Field(min_length=1, max_length=1000)
+    device_id: str = Field(min_length=4)
+    timestamp: str
+
+
+class CommentCreate(CommentBase):
+    pass
+
+
+class Comment(CommentBase):
+    pass
+
+
 class ResponderNoteRequest(BaseModel):
     note: str = Field(default="", max_length=1000)
+
+
+class DeleteDemoReportsRequest(BaseModel):
+    report_ids: list[str] = Field(default_factory=list)
 
 
 class IncidentGuidanceRequest(BaseModel):

@@ -1,6 +1,15 @@
 import ReportForm from "../components/ReportForm";
+import { useNavigate } from "react-router-dom";
 
 export default function CreateReportPage({ mesh }) {
+  const navigate = useNavigate();
+
+  async function createReport(report) {
+    const duplicate = await mesh.createLocalReport(report);
+    navigate("/");
+    return duplicate;
+  }
+
   return (
     <div className="form-page">
       <section className="section-header">
@@ -9,7 +18,7 @@ export default function CreateReportPage({ mesh }) {
           <h1>Create Report</h1>
         </div>
       </section>
-      <ReportForm deviceId={mesh.deviceId} reports={mesh.reports} onSubmit={mesh.createLocalReport} />
+      <ReportForm deviceId={mesh.deviceId} reports={mesh.reports} onSubmit={createReport} />
     </div>
   );
 }

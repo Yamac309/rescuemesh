@@ -63,6 +63,8 @@ export default function MapPage({ mesh }) {
               onConfirm={mesh.confirmLocalReport}
               onResolve={mesh.resolveLocalReport}
               onIgnore={mesh.ignoreLocalReport}
+              onAddComment={mesh.addCommentToReport}
+              comments={mesh.commentsByReportId[report.report_id] || []}
               allReports={mesh.reports}
               compact
             />

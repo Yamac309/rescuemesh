@@ -86,6 +86,42 @@ def test_confirming_report(client: TestClient) -> None:
     assert repeated.json()["confirmation_count"] == 2
 
 
+def test_report_comments_can_be_created_and_listed(client: TestClient) -> None:
+    client.post("/reports", json=sample_report())
+    comment = {
+        "comment_id": "comment-local-1",
+        "report_id": "local-report-1",
+        "body": "Road access is still clear from the south side.",
+        "device_id": "device-beta",
+        "timestamp": "2026-05-01T12:05:00Z",
+    }
+
+    created = client.post("/reports/local-report-1/comments", json=comment)
+    listed = client.get("/reports/local-report-1/comments")
+
+    assert created.status_code == 201
+    assert created.json()["body"] == comment["body"]
+    assert listed.status_code == 200
+    assert listed.json() == [comment]
+
+
+def test_comment_requires_matching_report_id(client: TestClient) -> None:
+    client.post("/reports", json=sample_report())
+
+    response = client.post(
+        "/reports/local-report-1/comments",
+        json={
+            "comment_id": "comment-local-1",
+            "report_id": "different-report",
+            "body": "Wrong report.",
+            "device_id": "device-beta",
+            "timestamp": "2026-05-01T12:05:00Z",
+        },
+    )
+
+    assert response.status_code == 400
+
+
 def test_marking_report_resolved(client: TestClient) -> None:
     client.post("/reports", json=sample_report())
 
@@ -105,6 +141,22 @@ def test_delete_demo_reports(client: TestClient) -> None:
     assert response.json()["deleted_count"] == 1
     remaining_titles = [report["title"] for report in client.get("/reports").json()]
     assert remaining_titles == ["Custom field report"]
+
+
+def test_delete_demo_reports_tombstones_requested_local_ids(client: TestClient) -> None:
+    response = client.request("DELETE", "/demo/reports", json={"report_ids": ["local-demo-not-yet-synced"]})
+
+    assert response.status_code == 200
+    assert response.json()["deleted_report_ids"] == ["local-demo-not-yet-synced"]
+
+    sync_response = client.post(
+        "/sync",
+        json={"known_report_ids": [], "reports": [sample_report("local-demo-not-yet-synced")]},
+    )
+
+    assert sync_response.status_code == 200
+    assert sync_response.json()["accepted_reports"] == []
+    assert sync_response.json()["total_reports"] == 0
 
 
 def test_delete_all_reports(client: TestClient) -> None:

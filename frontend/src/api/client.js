@@ -61,6 +61,17 @@ export function confirmReport(reportId, deviceId) {
   });
 }
 
+export function getReportComments(reportId) {
+  return request(`/reports/${encodeURIComponent(reportId)}/comments`);
+}
+
+export function postReportComment(reportId, comment) {
+  return request(`/reports/${encodeURIComponent(reportId)}/comments`, {
+    method: "POST",
+    body: JSON.stringify(comment)
+  });
+}
+
 export function resolveReport(reportId) {
   return request(`/reports/${encodeURIComponent(reportId)}/resolve`, {
     method: "POST"
@@ -124,9 +135,10 @@ export function getIncidentGuidance(report, options = {}) {
   });
 }
 
-export function deleteDemoReports() {
+export function deleteDemoReports(reportIds = []) {
   return request("/demo/reports", {
-    method: "DELETE"
+    method: "DELETE",
+    body: JSON.stringify({ report_ids: reportIds })
   });
 }
 

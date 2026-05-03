@@ -151,14 +151,20 @@ export default function ReportForm({ deviceId, reports = [], onSubmit }) {
       }
     }
 
-    const duplicate = await onSubmit(report);
-    setForm(initialForm);
-    setMessageTone(duplicate ? "warning" : "success");
-    setMessage(
-      duplicate
-        ? `This may be a duplicate of an existing report: "${duplicate.title}". The report was still saved.`
-        : "Report saved locally. It will sync when a RescueMesh Node is reachable."
-    );
+    try {
+      const duplicate = await onSubmit(report);
+      setForm(initialForm);
+      setMessageTone(duplicate ? "warning" : "success");
+      setMessage(
+        duplicate
+          ? `This may be a duplicate of an existing report: "${duplicate.title}". The report was still saved.`
+          : "Report saved and added to the dashboard."
+      );
+    } catch (error) {
+      console.error("Unable to create report", error);
+      setMessageTone("warning");
+      setMessage("The report could not be saved. Check the required fields and try again.");
+    }
   }
 
   return (

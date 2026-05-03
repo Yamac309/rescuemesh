@@ -15,6 +15,9 @@ from .services.location_checks import get_known_locations
 from .services.location_search import geocode_location
 from .schemas import (
     ConfirmRequest,
+    Comment,
+    CommentCreate,
+    DeleteDemoReportsRequest,
     IncidentGuidanceRequest,
     IncidentGuidanceResponse,
     LocationSuggestion,
@@ -161,6 +164,25 @@ async def confirm_report(report_id: str, payload: ConfirmRequest) -> dict:
     return report
 
 
+@app.get("/reports/{report_id}/comments", response_model=list[Comment])
+def list_report_comments(report_id: str) -> list[dict]:
+    if database.get_report(report_id) is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return database.get_comments(report_id)
+
+
+@app.post("/reports/{report_id}/comments", response_model=Comment, status_code=201)
+async def create_report_comment(report_id: str, payload: CommentCreate) -> dict:
+    if payload.report_id != report_id:
+        raise HTTPException(status_code=400, detail="Comment report_id must match URL report_id")
+    inserted, comment = database.insert_comment(payload)
+    if comment is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if inserted:
+        await manager.broadcast({"type": "comment:new", "comment": comment})
+    return comment
+
+
 @app.post("/reports/{report_id}/resolve", response_model=Report)
 async def resolve_report(report_id: str) -> dict:
     report = database.resolve_report(report_id)
@@ -198,13 +220,17 @@ async def add_responder_note(report_id: str, payload: ResponderNoteRequest) -> d
 
 
 @app.delete("/demo/reports", dependencies=[Depends(require_admin_token)])
-async def delete_demo_reports() -> dict:
+async def delete_demo_reports(payload: DeleteDemoReportsRequest | None = None) -> dict:
+    requested_report_ids = payload.report_ids if payload else []
+    if requested_report_ids:
+        database.remember_deleted_report_ids(requested_report_ids)
     deleted_report_ids = database.delete_demo_reports()
     if not deleted_report_ids:
         deleted_report_ids = database.delete_reports_by_titles(DEMO_REPORT_TITLES)
-    if deleted_report_ids:
-        await manager.broadcast({"type": "reports:deleted", "report_ids": deleted_report_ids})
-    return {"deleted_report_ids": deleted_report_ids, "deleted_count": len(deleted_report_ids)}
+    all_deleted_report_ids = sorted(set([*requested_report_ids, *deleted_report_ids]))
+    if all_deleted_report_ids:
+        await manager.broadcast({"type": "reports:deleted", "report_ids": all_deleted_report_ids})
+    return {"deleted_report_ids": all_deleted_report_ids, "deleted_count": len(all_deleted_report_ids)}
 
 
 @app.delete("/reports", dependencies=[Depends(require_admin_token)])

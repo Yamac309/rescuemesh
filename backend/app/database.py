@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from .config.emergency_zone import get_node_id
-from .schemas import ReportCreate
+from .schemas import CommentCreate, ReportCreate
 
 
 def get_db_path() -> Path:
@@ -92,6 +92,18 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS deleted_reports (
                 report_id TEXT PRIMARY KEY,
                 deleted_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS comments (
+                comment_id TEXT PRIMARY KEY,
+                report_id TEXT NOT NULL,
+                body TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                FOREIGN KEY (report_id) REFERENCES reports(report_id)
             )
             """
         )
@@ -201,6 +213,63 @@ def get_report(report_id: str) -> dict | None:
             (report_id,),
         ).fetchone()
         return row_to_report(row) if row else None
+
+
+def row_to_comment(row: sqlite3.Row) -> dict:
+    return {
+        "comment_id": row["comment_id"],
+        "report_id": row["report_id"],
+        "body": row["body"],
+        "device_id": row["device_id"],
+        "timestamp": row["timestamp"],
+    }
+
+
+def get_comments(report_id: str) -> list[dict]:
+    with get_connection() as db:
+        rows = db.execute(
+            """
+            SELECT comment_id, report_id, body, device_id, timestamp
+            FROM comments
+            WHERE report_id = ?
+            ORDER BY timestamp ASC
+            """,
+            (report_id,),
+        ).fetchall()
+        return [row_to_comment(row) for row in rows]
+
+
+def insert_comment(comment: CommentCreate) -> tuple[bool, dict | None]:
+    with get_connection() as db:
+        report_exists = db.execute("SELECT report_id FROM reports WHERE report_id = ?", (comment.report_id,)).fetchone()
+        if not report_exists:
+            return False, None
+        existing = db.execute("SELECT comment_id FROM comments WHERE comment_id = ?", (comment.comment_id,)).fetchone()
+        if existing:
+            row = db.execute(
+                """
+                SELECT comment_id, report_id, body, device_id, timestamp
+                FROM comments
+                WHERE comment_id = ?
+                """,
+                (comment.comment_id,),
+            ).fetchone()
+            return False, row_to_comment(row)
+        db.execute(
+            """
+            INSERT INTO comments (comment_id, report_id, body, device_id, timestamp)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (comment.comment_id, comment.report_id, comment.body, comment.device_id, comment.timestamp),
+        )
+        db.commit()
+    return True, {
+        "comment_id": comment.comment_id,
+        "report_id": comment.report_id,
+        "body": comment.body,
+        "device_id": comment.device_id,
+        "timestamp": comment.timestamp,
+    }
 
 
 def insert_report(report: ReportCreate) -> tuple[bool, dict]:
@@ -484,6 +553,7 @@ def delete_reports_by_titles(titles: list[str]) -> list[str]:
             )
             id_placeholders = ",".join("?" for _ in report_ids)
             db.execute(f"DELETE FROM confirmations WHERE report_id IN ({id_placeholders})", report_ids)
+            db.execute(f"DELETE FROM comments WHERE report_id IN ({id_placeholders})", report_ids)
             db.execute(f"DELETE FROM reports WHERE report_id IN ({id_placeholders})", report_ids)
         db.commit()
     return report_ids
@@ -515,6 +585,7 @@ def delete_all_reports() -> list[str]:
                 [(report_id,) for report_id in report_ids],
             )
         db.execute("DELETE FROM confirmations")
+        db.execute("DELETE FROM comments")
         db.execute("DELETE FROM reports")
         db.commit()
     return report_ids

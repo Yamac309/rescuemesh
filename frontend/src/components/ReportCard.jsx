@@ -4,10 +4,21 @@ import { calculateConfidence, getFreshness, getVerificationLabel } from "../util
 import AiIncidentGuidance from "./AiIncidentGuidance";
 import AgingBadge from "./AgingBadge";
 import ConfidenceBadge from "./ConfidenceBadge";
+import ReportComments from "./ReportComments";
 import TrustSourceBadge from "./TrustSourceBadge";
 import VerificationDetails from "./VerificationDetails";
 
-export default function ReportCard({ report, deviceId, onConfirm, onResolve, onIgnore, allReports = [], compact = false }) {
+export default function ReportCard({
+  report,
+  deviceId,
+  onConfirm,
+  onResolve,
+  onIgnore,
+  onAddComment,
+  comments = [],
+  allReports = [],
+  compact = false
+}) {
   const alreadyConfirmed = report.confirmed_by_device_ids?.includes(deviceId);
   const freshness = getFreshness(report);
   const confidence = calculateConfidence(report, allReports);
@@ -69,6 +80,7 @@ export default function ReportCard({ report, deviceId, onConfirm, onResolve, onI
       </div>
       {!compact && <AiIncidentGuidance report={report} />}
       {!compact && <VerificationDetails report={report} />}
+      {!compact && onAddComment && <ReportComments report={report} comments={comments} deviceId={deviceId} onAddComment={onAddComment} />}
       <p className="timestamp">{new Date(report.timestamp).toLocaleString()}</p>
       <div className="card-actions">
         <button className="secondary" onClick={() => onConfirm(report.report_id)} disabled={alreadyConfirmed || report.status === "Resolved"}>
