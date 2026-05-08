@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { LocateFixed, MapPin, Search } from "lucide-react";
 import { geocodeLocation } from "../api/client";
-import { CATEGORIES, STATUSES, URGENCY_LEVELS } from "../utils/constants";
+import { CATEGORIES, STATUSES, URGENCY_LEVELS, isInsideUsaBounds } from "../utils/constants";
 import { findPossibleDuplicate, makeReportId } from "../utils/reportUtils";
 
 const initialForm = {
@@ -30,6 +30,11 @@ export default function ReportForm({ deviceId, reports = [], onSubmit }) {
   }
 
   function applyLocationSuggestion(suggestion) {
+    if (!isInsideUsaBounds(suggestion)) {
+      setMessageTone("warning");
+      setMessage("RescueMesh is currently limited to U.S. incident locations.");
+      return;
+    }
     setForm((cur) => ({
       ...cur,
       locationQuery: suggestion.address || suggestion.name,
@@ -113,13 +118,22 @@ export default function ReportForm({ deviceId, reports = [], onSubmit }) {
     setMessage("Requesting device location...");
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        const location = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        };
+        if (!isInsideUsaBounds(location)) {
+          setMessageTone("warning");
+          setMessage("Your device location is outside the U.S. operating area. Enter a U.S. incident location manually.");
+          return;
+        }
         setForm((cur) => ({
           ...cur,
           locationName: "Current device location",
           locationQuery: cur.locationQuery || "Current device location",
           locationAddress: "",
-          latitude: position.coords.latitude.toFixed(6),
-          longitude: position.coords.longitude.toFixed(6),
+          latitude: location.latitude.toFixed(6),
+          longitude: location.longitude.toFixed(6),
         }));
         setLocationResults([]);
         setMessageTone("success");
@@ -160,6 +174,12 @@ export default function ReportForm({ deviceId, reports = [], onSubmit }) {
       confirmed_by_device_ids: [],
       sync_state: "pending",
     };
+
+    if (!isInsideUsaBounds(report)) {
+      setMessageTone("warning");
+      setMessage("RescueMesh is currently limited to U.S. incident locations. Choose coordinates inside the U.S. operating area.");
+      return;
+    }
 
     const possibleDuplicate = findPossibleDuplicate(report, reports);
     if (possibleDuplicate) {

@@ -5,6 +5,7 @@ import ReportCard from "../components/ReportCard";
 import ReportFilters from "../components/ReportFilters";
 import ReportMap from "../components/ReportMap";
 import { useLiveIncidents } from "../hooks/useLiveIncidents";
+import { isInsideUsaBounds } from "../utils/constants";
 import { calculateConfidence, getFreshness, getVerificationLabel } from "../utils/reportUtils";
 
 function applyFilters(reports, filters) {
@@ -48,12 +49,13 @@ export default function MapPage({ mesh }) {
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [showLiveIncidents, setShowLiveIncidents] = useState(true);
   const liveIncidents = useLiveIncidents({ enabled: showLiveIncidents, days: 7, limit: 200 });
+  const usaReports = useMemo(() => mesh.reports.filter(isInsideUsaBounds), [mesh.reports]);
 
   const filteredReports = useMemo(
-    () => applyFilters(mesh.reports, filters),
-    [mesh.reports, filters]
+    () => applyFilters(usaReports, filters),
+    [usaReports, filters]
   );
-  const visibleLiveIncidents = showLiveIncidents ? liveIncidents.incidents : [];
+  const visibleLiveIncidents = showLiveIncidents ? liveIncidents.incidents.filter(isInsideUsaBounds) : [];
 
   return (
     <div className="page-grid">
@@ -63,7 +65,7 @@ export default function MapPage({ mesh }) {
           <h1>Map</h1>
         </div>
         <span className="map-report-count">
-          {filteredReports.length} of {mesh.reports.length} reports · {visibleLiveIncidents.length} live
+          {filteredReports.length} of {usaReports.length} U.S. reports · {visibleLiveIncidents.length} live
         </span>
       </section>
 
@@ -94,7 +96,7 @@ export default function MapPage({ mesh }) {
       <ReportFilters filters={filters} onChange={setFilters} />
 
       <div className="map-layout">
-        <ReportMap reports={filteredReports} allReports={mesh.reports} liveIncidents={visibleLiveIncidents} />
+        <ReportMap reports={filteredReports} allReports={usaReports} liveIncidents={visibleLiveIncidents} />
 
         <aside className="map-list">
           {visibleLiveIncidents.map((incident) => (
@@ -110,12 +112,12 @@ export default function MapPage({ mesh }) {
               onIgnore={mesh.ignoreLocalReport}
               onAddComment={mesh.addCommentToReport}
               comments={mesh.commentsByReportId[report.report_id] || []}
-              allReports={mesh.reports}
+              allReports={usaReports}
               compact
             />
           ))}
           {!filteredReports.length && !visibleLiveIncidents.length && (
-            <p className="empty-state">No reports match these filters.</p>
+            <p className="empty-state">No U.S. reports match these filters.</p>
           )}
         </aside>
       </div>

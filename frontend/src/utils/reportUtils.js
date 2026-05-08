@@ -1,3 +1,5 @@
+import { USA_BOUNDS } from "./constants";
+
 const DUPLICATE_WINDOW_MS = 6 * 60 * 60 * 1000;
 const DUPLICATE_DISTANCE_METERS = 250;
 const NEARBY_MATCH_DISTANCE_METERS = 300;
@@ -5,10 +7,10 @@ const NEARBY_MATCH_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const DEMO_TIME_OFFSET_KEY = "rescuemesh-demo-time-offset-hours";
 
 const DEFAULT_EMERGENCY_ZONE = {
-  minLatitude: 40.7,
-  maxLatitude: 40.725,
-  minLongitude: -74.02,
-  maxLongitude: -73.99
+  minLatitude: USA_BOUNDS[0][0],
+  maxLatitude: USA_BOUNDS[1][0],
+  minLongitude: USA_BOUNDS[0][1],
+  maxLongitude: USA_BOUNDS[1][1]
 };
 
 export function getDemoTimeOffsetHours() {

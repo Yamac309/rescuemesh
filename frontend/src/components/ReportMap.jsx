@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Crosshair, Layers, LocateFixed, MapPinned, Satellite } from "lucide-react";
-import { CATEGORY_MARKERS, URGENCY_CLASS, WORLD_CENTER } from "../utils/constants";
+import { CATEGORY_MARKERS, URGENCY_CLASS, USA_BOUNDS, USA_CENTER, isInsideUsaBounds } from "../utils/constants";
 import { calculateConfidence, getFreshness, getVerificationLabel } from "../utils/reportUtils";
 
 const MAPKIT_TOKEN = import.meta.env.VITE_MAPKIT_JS_TOKEN;
@@ -26,6 +26,8 @@ const URGENCY_COLORS = {
   High:     "#c2380d",
   Critical: "#9b1515",
 };
+const USA_LEAFLET_BOUNDS = L.latLngBounds(USA_BOUNDS);
+const USA_DEFAULT_ZOOM = 4;
 
 let mapKitLoadPromise;
 
@@ -80,7 +82,36 @@ function reportWithValidCoordinates(report) {
   const longitude = Number(report.longitude);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
   if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+  if (!isInsideUsaBounds({ latitude, longitude })) return null;
   return { ...report, latitude, longitude };
+}
+
+function clampToUsaBounds([latitude, longitude]) {
+  return [
+    Math.min(Math.max(latitude, USA_BOUNDS[0][0]), USA_BOUNDS[1][0]),
+    Math.min(Math.max(longitude, USA_BOUNDS[0][1]), USA_BOUNDS[1][1])
+  ];
+}
+
+function setMapKitUsaRegion(map, mapkit, animate = false) {
+  if (!map || !mapkit) return;
+  const center = new mapkit.Coordinate(USA_CENTER[0], USA_CENTER[1]);
+  if (mapkit.CoordinateSpan && mapkit.CoordinateRegion) {
+    const span = new mapkit.CoordinateSpan(
+      USA_BOUNDS[1][0] - USA_BOUNDS[0][0],
+      USA_BOUNDS[1][1] - USA_BOUNDS[0][1]
+    );
+    const region = new mapkit.CoordinateRegion(center, span);
+    if (typeof map.setRegionAnimated === "function") {
+      map.setRegionAnimated(region, animate);
+    } else {
+      map.region = region;
+    }
+  } else if (typeof map.setCenterAnimated === "function") {
+    map.setCenterAnimated(center, animate);
+  } else {
+    map.center = center;
+  }
 }
 
 function markerClassName(report, verificationLabel, freshness) {
@@ -205,11 +236,10 @@ export default function ReportMap({ reports, allReports = reports, liveIncidents
       if (!mapItems.length) {
         if (engineRef.current === "leaflet") {
           invalidateMapSize();
-          mapRef.current.setView(WORLD_CENTER, 2, { animate });
+          mapRef.current.fitBounds(USA_LEAFLET_BOUNDS, { animate, padding: [12, 12] });
         }
         if (engineRef.current === "mapkit" && window.mapkit) {
-          const coordinate = new window.mapkit.Coordinate(WORLD_CENTER[0], WORLD_CENTER[1]);
-          mapRef.current.setCenterAnimated(coordinate, animate);
+          setMapKitUsaRegion(mapRef.current, window.mapkit, animate);
         }
         finishProgrammaticMoveSoon();
         return;
@@ -251,8 +281,15 @@ export default function ReportMap({ reports, allReports = reports, liveIncidents
           showsCompass: mapkit.FeatureVisibility?.Adaptive,
           showsScale: mapkit.FeatureVisibility?.Adaptive,
         });
+        setMapKitUsaRegion(map, mapkit, false);
         map.addEventListener("drag", () => {
           if (!programmaticMoveRef.current) userInteractedRef.current = true;
+        });
+        map.addEventListener?.("region-change-end", () => {
+          const center = map.center;
+          if (!center || isInsideUsaBounds({ latitude: center.latitude, longitude: center.longitude })) return;
+          const [latitude, longitude] = clampToUsaBounds([center.latitude, center.longitude]);
+          map.setCenterAnimated?.(new mapkit.Coordinate(latitude, longitude), true);
         });
         mapRef.current = map;
         setMapProvider("Apple Maps");
@@ -262,11 +299,15 @@ export default function ReportMap({ reports, allReports = reports, liveIncidents
         if (destroyed || engineRef.current) return;
         engineRef.current = "leaflet";
         const map = L.map(containerRef.current, {
-          center: WORLD_CENTER,
-          zoom: 2,
+          center: USA_CENTER,
+          zoom: USA_DEFAULT_ZOOM,
           zoomControl: true,
           attributionControl: true,
+          maxBounds: USA_LEAFLET_BOUNDS,
+          maxBoundsViscosity: 1,
+          minZoom: 4,
         });
+        map.fitBounds(USA_LEAFLET_BOUNDS, { padding: [12, 12], animate: false });
         map.on("dragstart", () => {
           if (!programmaticMoveRef.current) userInteractedRef.current = true;
         });
@@ -403,6 +444,12 @@ export default function ReportMap({ reports, allReports = reports, liveIncidents
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const latLng = [position.coords.latitude, position.coords.longitude];
+        if (!isInsideUsaBounds({ latitude: latLng[0], longitude: latLng[1] })) {
+          setLocationTone("warning");
+          setLocationMessage("Your device location is outside the U.S. operating area.");
+          fitReports({ animate: true, force: true });
+          return;
+        }
         setLocationTone("success");
         setLocationMessage(`Device location: ${latLng[0].toFixed(5)}, ${latLng[1].toFixed(5)}`);
         userInteractedRef.current = true;

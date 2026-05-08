@@ -315,7 +315,7 @@ def test_inside_emergency_zone_increases_confidence(client: TestClient) -> None:
 
 
 def test_outside_emergency_zone_lowers_confidence(client: TestClient) -> None:
-    response = client.post("/reports", json=report_with("outside-zone-1", latitude=41.0, longitude=-75.0))
+    response = client.post("/reports", json=report_with("outside-zone-1", latitude=51.0, longitude=-75.0))
 
     assert response.json()["verification_signals"]["insideEmergencyZone"] is False
     assert "Report is outside the configured emergency area." in response.json()["warning_reasons"]
