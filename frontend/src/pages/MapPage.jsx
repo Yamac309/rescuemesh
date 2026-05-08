@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react";
+import { RefreshCw, RadioTower } from "lucide-react";
+import LiveIncidentCard from "../components/LiveIncidentCard";
 import ReportCard from "../components/ReportCard";
 import ReportFilters from "../components/ReportFilters";
 import ReportMap from "../components/ReportMap";
+import { useLiveIncidents } from "../hooks/useLiveIncidents";
 import { calculateConfidence, getFreshness, getVerificationLabel } from "../utils/reportUtils";
 
 function applyFilters(reports, filters) {
@@ -43,11 +46,14 @@ const DEFAULT_FILTERS = {
 
 export default function MapPage({ mesh }) {
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [showLiveIncidents, setShowLiveIncidents] = useState(true);
+  const liveIncidents = useLiveIncidents({ enabled: showLiveIncidents, days: 7, limit: 200 });
 
   const filteredReports = useMemo(
     () => applyFilters(mesh.reports, filters),
     [mesh.reports, filters]
   );
+  const visibleLiveIncidents = showLiveIncidents ? liveIncidents.incidents : [];
 
   return (
     <div className="page-grid">
@@ -57,16 +63,43 @@ export default function MapPage({ mesh }) {
           <h1>Map</h1>
         </div>
         <span className="map-report-count">
-          {filteredReports.length} of {mesh.reports.length} reports
+          {filteredReports.length} of {mesh.reports.length} reports · {visibleLiveIncidents.length} live
+        </span>
+      </section>
+
+      <section className="live-incident-controls">
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={showLiveIncidents}
+            onChange={(event) => setShowLiveIncidents(event.target.checked)}
+          />
+          <span><RadioTower size={16} /> Live incidents from last 7 days</span>
+        </label>
+        <button
+          type="button"
+          className="secondary"
+          onClick={liveIncidents.refresh}
+          disabled={!showLiveIncidents || liveIncidents.refreshing}
+        >
+          <RefreshCw size={16} /> {liveIncidents.refreshing ? "Refreshing" : "Refresh Live"}
+        </button>
+        <span className={`live-incident-status ${liveIncidents.error ? "warning" : ""}`}>
+          {showLiveIncidents
+            ? liveIncidents.error || (liveIncidents.loading ? "Loading live incidents..." : liveIncidents.status?.available ? "MongoDB Atlas live feed connected" : "MongoDB Atlas live feed not configured")
+            : "Live layer hidden"}
         </span>
       </section>
 
       <ReportFilters filters={filters} onChange={setFilters} />
 
       <div className="map-layout">
-        <ReportMap reports={filteredReports} allReports={mesh.reports} />
+        <ReportMap reports={filteredReports} allReports={mesh.reports} liveIncidents={visibleLiveIncidents} />
 
         <aside className="map-list">
+          {visibleLiveIncidents.map((incident) => (
+            <LiveIncidentCard key={incident.incidentId} incident={incident} />
+          ))}
           {filteredReports.map((report) => (
             <ReportCard
               key={report.report_id}
@@ -81,7 +114,7 @@ export default function MapPage({ mesh }) {
               compact
             />
           ))}
-          {!filteredReports.length && (
+          {!filteredReports.length && !visibleLiveIncidents.length && (
             <p className="empty-state">No reports match these filters.</p>
           )}
         </aside>

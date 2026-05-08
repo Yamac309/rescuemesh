@@ -138,6 +138,41 @@ class LocationSuggestion(BaseModel):
     source: Literal["known-location", "openstreetmap"]
 
 
+class LiveIncident(BaseModel):
+    incident_id: str = Field(min_length=8)
+    title: str = Field(min_length=1, max_length=160)
+    category: Category
+    description: str = Field(default="", max_length=2000)
+    urgency: Urgency
+    location_name: str = Field(default="", max_length=500)
+    location_address: str = Field(default="", max_length=500)
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    status: Status = "Confirmed"
+    timestamp: str
+    source: str = Field(default="National Weather Service", max_length=120)
+    source_url: str = Field(default="", max_length=1000)
+    event_type: str = Field(default="", max_length=160)
+    expires_at: str = Field(default="", max_length=80)
+
+
+class LiveIncidentStatus(BaseModel):
+    configured: bool
+    driver_installed: bool
+    database: str
+    collection: str
+    source: str
+    window_days: int
+    available: bool
+
+
+class LiveIncidentRefreshResponse(BaseModel):
+    imported_count: int
+    stored_count: int
+    incidents: list[LiveIncident]
+    status: LiveIncidentStatus
+
+
 class NodeStatus(BaseModel):
     node_name: str
     connected_clients: int

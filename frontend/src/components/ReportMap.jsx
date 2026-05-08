@@ -96,6 +96,16 @@ function markerClassName(report, verificationLabel, freshness) {
     .join(" ");
 }
 
+function liveMarkerClassName(incident) {
+  return [
+    "mesh-marker",
+    "marker-live",
+    URGENCY_CLASS[incident.urgency]
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 function popupHtml(report, verificationLabel, freshness, confidence) {
   return `
     <div class="map-popup">
@@ -114,7 +124,23 @@ function popupHtml(report, verificationLabel, freshness, confidence) {
   `;
 }
 
-export default function ReportMap({ reports, allReports = reports }) {
+function liveIncidentPopupHtml(incident) {
+  return `
+    <div class="map-popup live-popup">
+      <strong>${escapeHtml(incident.title)}</strong>
+      <span>${escapeHtml(incident.source || "Live source")}</span>
+      ${incident.locationName ? `<small>${escapeHtml(incident.locationName)}</small>` : ""}
+      ${incident.description ? `<p>${escapeHtml(incident.description)}</p>` : ""}
+      <dl>
+        <dt>Urgency</dt><dd>${escapeHtml(incident.urgency)}</dd>
+        <dt>Status</dt><dd>${escapeHtml(incident.status)}</dd>
+        <dt>Source</dt><dd>${escapeHtml(incident.eventType || "Official feed")}</dd>
+      </dl>
+    </div>
+  `;
+}
+
+export default function ReportMap({ reports, allReports = reports, liveIncidents = [] }) {
   const mapRef = useRef(null);
   const engineRef = useRef(null);
   const containerRef = useRef(null);
@@ -137,11 +163,19 @@ export default function ReportMap({ reports, allReports = reports }) {
 
   const validReports = useMemo(() => reports.map(reportWithValidCoordinates).filter(Boolean), [reports]);
   const validAllReports = useMemo(() => allReports.map(reportWithValidCoordinates).filter(Boolean), [allReports]);
+  const validLiveIncidents = useMemo(() => liveIncidents.map(reportWithValidCoordinates).filter(Boolean), [liveIncidents]);
+  const mapItems = useMemo(
+    () => [
+      ...validReports.map((report) => ({ kind: "report", item: report })),
+      ...validLiveIncidents.map((incident) => ({ kind: "live", item: incident }))
+    ],
+    [validLiveIncidents, validReports]
+  );
   const openReportCount = validReports.filter((r) => r.status !== "Resolved").length;
-  const criticalCount = validReports.filter((r) => r.urgency === "Critical" && r.status !== "Resolved").length;
+  const criticalCount = mapItems.filter(({ item }) => item.urgency === "Critical" && item.status !== "Resolved").length;
   const reportsKey = useMemo(
-    () => validReports.map((r) => `${r.report_id}:${r.latitude}:${r.longitude}`).join("|"),
-    [validReports]
+    () => mapItems.map(({ kind, item }) => `${kind}:${item.report_id || item.incidentId}:${item.latitude}:${item.longitude}`).join("|"),
+    [mapItems]
   );
 
   const invalidateMapSize = useCallback(() => {
@@ -168,7 +202,7 @@ export default function ReportMap({ reports, allReports = reports }) {
 
       programmaticMoveRef.current = true;
 
-      if (!validReports.length) {
+      if (!mapItems.length) {
         if (engineRef.current === "leaflet") {
           invalidateMapSize();
           mapRef.current.setView(WORLD_CENTER, 2, { animate });
@@ -189,7 +223,7 @@ export default function ReportMap({ reports, allReports = reports }) {
 
       if (engineRef.current !== "leaflet") { finishProgrammaticMoveSoon(); return; }
 
-      const points = validReports.map((r) => [r.latitude, r.longitude]);
+      const points = mapItems.map(({ item }) => [item.latitude, item.longitude]);
       const uniquePoints = new Set(points.map((p) => p.join(",")));
       invalidateMapSize();
       if (uniquePoints.size === 1) {
@@ -199,7 +233,7 @@ export default function ReportMap({ reports, allReports = reports }) {
       }
       finishProgrammaticMoveSoon();
     },
-    [validReports, invalidateMapSize, finishProgrammaticMoveSoon]
+    [mapItems, invalidateMapSize, finishProgrammaticMoveSoon]
   );
 
   // Map init
@@ -296,13 +330,13 @@ export default function ReportMap({ reports, allReports = reports }) {
     if (engineRef.current === "mapkit" && window.mapkit) {
       const mapkit = window.mapkit;
       if (mapKitAnnotationsRef.current.length) mapRef.current.removeAnnotations(mapKitAnnotationsRef.current);
-      const annotations = validReports.map((report) => {
-        const verificationLabel = getVerificationLabel(report, validAllReports);
-        return new mapkit.MarkerAnnotation(new mapkit.Coordinate(report.latitude, report.longitude), {
-          color: URGENCY_COLORS[report.urgency] || "#1c7a4f",
-          glyphText: CATEGORY_MARKERS[report.category] || "INFO",
-          title: report.title,
-          subtitle: report.locationAddress || report.locationName || verificationLabel,
+      const annotations = mapItems.map(({ kind, item }) => {
+        const verificationLabel = kind === "report" ? getVerificationLabel(item, validAllReports) : "Live source";
+        return new mapkit.MarkerAnnotation(new mapkit.Coordinate(item.latitude, item.longitude), {
+          color: kind === "live" ? "#0f766e" : URGENCY_COLORS[item.urgency] || "#1c7a4f",
+          glyphText: kind === "live" ? "LIVE" : CATEGORY_MARKERS[item.category] || "INFO",
+          title: item.title,
+          subtitle: item.locationAddress || item.locationName || verificationLabel,
         });
       });
       mapKitAnnotationsRef.current = annotations;
@@ -329,7 +363,21 @@ export default function ReportMap({ reports, allReports = reports }) {
       marker.bindPopup(popupHtml(report, verificationLabel, freshness, confidence));
       marker.addTo(markerLayerRef.current);
     });
-  }, [validReports, validAllReports, mapReadyVersion]);
+
+    validLiveIncidents.forEach((incident) => {
+      const marker = L.marker([incident.latitude, incident.longitude], {
+        icon: L.divIcon({
+          className: liveMarkerClassName(incident),
+          html: "<b>LIVE</b><i></i>",
+          iconSize: [58, 42],
+          iconAnchor: [29, 42],
+        }),
+        riseOnHover: true,
+      });
+      marker.bindPopup(liveIncidentPopupHtml(incident));
+      marker.addTo(markerLayerRef.current);
+    });
+  }, [validReports, validAllReports, validLiveIncidents, mapItems, mapReadyVersion]);
 
   // Fit
   useEffect(() => {
@@ -428,9 +476,9 @@ export default function ReportMap({ reports, allReports = reports }) {
           type="button"
           className="secondary"
           onClick={fitVisibleReports}
-          disabled={!validReports.length || !mapReadyVersion}
+          disabled={!mapItems.length || !mapReadyVersion}
         >
-          <Crosshair size={16} /> Fit Reports
+          <Crosshair size={16} /> Fit Map
         </button>
         <button
           type="button"
@@ -449,8 +497,8 @@ export default function ReportMap({ reports, allReports = reports }) {
         <div className="map-panel" ref={containerRef} />
         <div className="map-overlay-card">
           <span>{mapProvider}</span>
-          <strong>{validReports.length} visible</strong>
-          <small>{openReportCount} open · {criticalCount} critical</small>
+          <strong>{validReports.length} reports · {validLiveIncidents.length} live</strong>
+          <small>{openReportCount} open / {criticalCount} critical</small>
         </div>
         <div className="map-legend" aria-label="Urgency legend">
           <span><i className="legend-dot low" /> Low</span>
@@ -458,7 +506,7 @@ export default function ReportMap({ reports, allReports = reports }) {
           <span><i className="legend-dot high" /> High</span>
           <span><i className="legend-dot critical" /> Critical</span>
         </div>
-        {!validReports.length && (
+        {!mapItems.length && (
           <div className="map-empty">
             <MapPinned size={22} />
             <strong>No mapped reports</strong>

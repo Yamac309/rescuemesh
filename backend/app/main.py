@@ -11,6 +11,12 @@ from dotenv import load_dotenv
 from . import database
 from .config.emergency_zone import get_emergency_zone, get_node_id
 from .services.incident_guidance import generate_incident_guidance
+from .services.live_incidents import (
+    LiveIncidentStoreUnavailable,
+    list_live_incidents,
+    live_incident_status,
+    refresh_live_incidents,
+)
 from .services.location_checks import get_known_locations
 from .services.location_search import geocode_location
 from .schemas import (
@@ -20,6 +26,9 @@ from .schemas import (
     DeleteDemoReportsRequest,
     IncidentGuidanceRequest,
     IncidentGuidanceResponse,
+    LiveIncident,
+    LiveIncidentRefreshResponse,
+    LiveIncidentStatus,
     LocationSuggestion,
     NodeStatus,
     Report,
@@ -273,6 +282,27 @@ async def geocode(query: str, limit: int = 5) -> list[dict]:
     if len(cleaned_query) < 2:
         return []
     return await geocode_location(cleaned_query, limit)
+
+
+@app.get("/live-incidents/status", response_model=LiveIncidentStatus)
+def get_live_incident_status() -> dict:
+    return live_incident_status()
+
+
+@app.get("/live-incidents", response_model=list[LiveIncident])
+def get_live_incidents(days: int = 7, limit: int = 200) -> list[dict]:
+    try:
+        return list_live_incidents(days=days, limit=limit)
+    except LiveIncidentStoreUnavailable:
+        return []
+
+
+@app.post("/live-incidents/refresh", response_model=LiveIncidentRefreshResponse)
+async def refresh_live_incident_feed(days: int = 7, limit: int = 200) -> dict:
+    try:
+        return await refresh_live_incidents(days=days, limit=limit)
+    except LiveIncidentStoreUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
 
 @app.get("/ai/status")

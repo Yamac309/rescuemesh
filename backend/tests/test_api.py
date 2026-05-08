@@ -200,6 +200,27 @@ def test_delete_all_reports(client: TestClient) -> None:
     assert client.get("/reports").json() == []
 
 
+def test_live_incidents_are_empty_without_mongodb(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MONGODB_URI", raising=False)
+
+    response = client.get("/live-incidents")
+    status = client.get("/live-incidents/status").json()
+
+    assert response.status_code == 200
+    assert response.json() == []
+    assert status["configured"] is False
+    assert status["available"] is False
+    assert status["window_days"] == 7
+
+
+def test_live_incident_refresh_requires_mongodb(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MONGODB_URI", raising=False)
+
+    response = client.post("/live-incidents/refresh")
+
+    assert response.status_code == 503
+
+
 def test_geocode_returns_known_locations_without_remote_lookup(client: TestClient) -> None:
     response = client.get("/geocode", params={"query": "library"})
 

@@ -22,6 +22,7 @@ RescueMesh treats every browser as a local-first field notebook. Reports are gen
 - Local browser storage: IndexedDB
 - Backend: FastAPI
 - Database: SQLite
+- Optional live incident store: MongoDB Atlas
 - Realtime sync: WebSockets
 - Map: optional Apple MapKit JS with a Leaflet satellite fallback
 - Styling: plain CSS
@@ -81,6 +82,9 @@ Backend routes:
 - `POST /reports/{id}/responder-note`
 - `GET /reports/needs-review`
 - `GET /verification/config`
+- `GET /live-incidents`
+- `GET /live-incidents/status`
+- `POST /live-incidents/refresh`
 - `POST /ai/incident-guidance`
 - `DELETE /reports`
 - `GET /node/status`
@@ -96,6 +100,18 @@ export GOOGLE_AI_MODEL=gemini-2.5-flash-lite
 ```
 
 `GOOGLE_AI_API_KEY` is only read by the FastAPI backend. Do not put it in the frontend `.env` file. If the key is missing, RescueMesh still runs and shows a clear Gemini-unavailable state instead of prewritten advice. You can check the active backend mode at `GET /ai/status`.
+
+Optional MongoDB Atlas live incidents:
+
+```bash
+cp backend/.env.example backend/.env
+# Add your Atlas connection string. Keep this value on the backend only.
+MONGODB_URI=mongodb+srv://USER:PASSWORD@CLUSTER.mongodb.net/?retryWrites=true&w=majority
+MONGODB_DATABASE=rescuemesh
+MONGODB_LIVE_INCIDENTS_COLLECTION=live_incidents
+```
+
+When `MONGODB_URI` is configured and the backend dependencies are installed, the Map page can refresh a live incident layer from the National Weather Service alerts API and store those incidents in MongoDB. The live layer is separate from user reports, so clearing reports or removing demo data does not delete official live incidents. If MongoDB is not configured, the app still runs normally and the map shows a non-blocking live-feed status.
 
 ### Frontend
 
@@ -224,6 +240,7 @@ If Google AI is not configured, unavailable, or rate limited, the backend return
 - Duplicate report ID prevention
 - Duplicate warning for similar category/title/location/time reports
 - Satellite-first emergency map with optional Apple MapKit JS
+- Optional MongoDB Atlas live incident layer for official alerts from the last 7 days
 - Location search when creating reports, with address, latitude, and longitude kept editable
 - Randomized demo data batches with varied counts, addresses, locations, descriptions, and urgency levels
 - Category, urgency, and status filters

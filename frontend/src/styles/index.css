@@ -571,6 +571,37 @@ main { padding: 24px; min-width: 0; }
 
 .responder-filter-row { justify-content: flex-start; }
 
+.live-incident-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 14px;
+  background: #eef8f5;
+  border: 1px solid #b9ddd1;
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+}
+
+.live-incident-controls .checkbox-row {
+  min-height: 38px;
+  padding: 0 4px;
+}
+
+.live-incident-controls .checkbox-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.live-incident-status {
+  color: var(--green-dark);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.live-incident-status.warning { color: var(--amber); }
+
 /* -- Form Controls ---------------------------------------- */
 label {
   display: grid;
@@ -779,7 +810,7 @@ textarea { resize: vertical; }
 }
 
 .map-overlay-card {
-  left: 14px;
+  left: 58px;
   top: 14px;
   display: grid;
   gap: 2px;
@@ -896,6 +927,45 @@ textarea { resize: vertical; }
 .map-list::-webkit-scrollbar-track { background: transparent; }
 .map-list::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 99px; }
 
+.live-incident-card {
+  position: relative;
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  background: #f7fffc;
+  border: 1px solid #b9ddd1;
+  border-left: 4px solid var(--teal);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+}
+
+.live-incident-header,
+.live-incident-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.live-incident-card h3 {
+  font-size: 0.95rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.live-incident-link {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--teal);
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.live-incident-link:hover { text-decoration: underline; }
+
 /* Map markers */
 .mesh-marker {
   display: grid;
@@ -950,6 +1020,11 @@ textarea { resize: vertical; }
 
 .marker-low-trust { filter: grayscale(0.5) opacity(0.7); }
 .marker-verified  { outline: 3px solid #2fb36d; }
+.marker-live {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 4px rgba(15,118,110,0.18), 0 8px 20px rgba(0,0,0,0.32);
+}
+.marker-live b { font-size: 0.54rem; }
 .marker-stale,
 .marker-resolved  { opacity: 0.42; }
 

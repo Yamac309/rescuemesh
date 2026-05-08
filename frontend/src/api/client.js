@@ -111,6 +111,27 @@ export function geocodeLocation(query, options = {}) {
   });
 }
 
+export function getLiveIncidents(options = {}) {
+  const days = options.days || 7;
+  const limit = options.limit || 200;
+  return request(`/live-incidents?days=${encodeURIComponent(days)}&limit=${encodeURIComponent(limit)}`, {
+    signal: options.signal
+  });
+}
+
+export function getLiveIncidentStatus(options = {}) {
+  return request("/live-incidents/status", { signal: options.signal });
+}
+
+export function refreshLiveIncidents(options = {}) {
+  const days = options.days || 7;
+  const limit = options.limit || 200;
+  return request(`/live-incidents/refresh?days=${encodeURIComponent(days)}&limit=${encodeURIComponent(limit)}`, {
+    method: "POST",
+    signal: options.signal
+  });
+}
+
 export function getIncidentGuidance(report, options = {}) {
   const confidenceScore = report.confidence_score ?? report.confidenceScore;
   const verificationLabel = report.verification_label ?? report.verificationLabel;
