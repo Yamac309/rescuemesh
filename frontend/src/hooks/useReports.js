@@ -442,24 +442,39 @@ export function useReports() {
 
   const responderVerifyLocalReport = useCallback(
     async (reportId) => {
-      const updated = await responderVerifyReport(reportId);
-      await mergeIntoState([updated]);
+      try {
+        const updated = await responderVerifyReport(reportId);
+        await mergeIntoState([updated]);
+      } catch (error) {
+        if (error.status === 403) window.alert("Responder token required. Add it on the Node Status page.");
+        throw error;
+      }
     },
     [mergeIntoState]
   );
 
   const responderRejectLocalReport = useCallback(
     async (reportId) => {
-      const updated = await responderRejectReport(reportId);
-      await mergeIntoState([updated]);
+      try {
+        const updated = await responderRejectReport(reportId);
+        await mergeIntoState([updated]);
+      } catch (error) {
+        if (error.status === 403) window.alert("Responder token required. Add it on the Node Status page.");
+        throw error;
+      }
     },
     [mergeIntoState]
   );
 
   const addResponderNoteToReport = useCallback(
     async (reportId, note) => {
-      const updated = await addResponderNote(reportId, note);
-      await mergeIntoState([updated]);
+      try {
+        const updated = await addResponderNote(reportId, note);
+        await mergeIntoState([updated]);
+      } catch (error) {
+        if (error.status === 403) window.alert("Responder token required. Add it on the Node Status page.");
+        throw error;
+      }
     },
     [mergeIntoState]
   );
@@ -518,7 +533,8 @@ export function useReports() {
       const response = await deleteDemoReports([...localDeleted]);
       await removeFromState(response.deleted_report_ids || [...localDeleted]);
       await refreshNodeStatus();
-    } catch {
+    } catch (error) {
+      if (error.status === 403) window.alert("Admin token required. Add it on the Node Status page.");
       console.warn(`Removed ${localDeletedIds.length} local demo reports. Node cleanup will need a connection.`);
     } finally {
       demoRemovalInProgressRef.current = false;
@@ -549,10 +565,11 @@ export function useReports() {
       backendCleared = true;
       await removeFromState(response.deleted_report_ids || localReportIds);
       await refreshNodeStatus();
-    } catch {
+    } catch (error) {
       await deleteAllLocalReports();
       await clearIgnoredReports();
       setCommentsByReportId({});
+      if (error.status === 403) window.alert("Admin token required. Add it on the Node Status page.");
       console.warn(`Cleared ${localReportIds.length} local reports. Node cleanup will need a connection.`);
     } finally {
       clearInProgressRef.current = false;

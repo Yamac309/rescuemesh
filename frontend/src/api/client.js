@@ -17,10 +17,49 @@ function getApiBaseUrl() {
   return origin;
 }
 
+const ADMIN_TOKEN_KEY = "rescuemesh-admin-token";
+const RESPONDER_TOKEN_KEY = "rescuemesh-responder-token";
+
+function getStoredToken(key) {
+  if (typeof localStorage === "undefined") return "";
+  return localStorage.getItem(key) || "";
+}
+
+function setStoredToken(key, value) {
+  if (typeof localStorage === "undefined") return;
+  const trimmed = value.trim();
+  if (trimmed) {
+    localStorage.setItem(key, trimmed);
+  } else {
+    localStorage.removeItem(key);
+  }
+}
+
+export function getSecurityTokens() {
+  return {
+    adminToken: getStoredToken(ADMIN_TOKEN_KEY),
+    responderToken: getStoredToken(RESPONDER_TOKEN_KEY)
+  };
+}
+
+export function saveSecurityTokens({ adminToken = "", responderToken = "" }) {
+  setStoredToken(ADMIN_TOKEN_KEY, adminToken);
+  setStoredToken(RESPONDER_TOKEN_KEY, responderToken);
+}
+
+function securityHeaders() {
+  const { adminToken, responderToken } = getSecurityTokens();
+  return {
+    ...(adminToken ? { "X-Admin-Token": adminToken } : {}),
+    ...(responderToken ? { "X-Responder-Token": responderToken } : {})
+  };
+}
+
 async function request(path, options = {}) {
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     headers: {
       "Content-Type": "application/json",
+      ...securityHeaders(),
       ...(options.headers || {})
     },
     ...options
@@ -103,6 +142,10 @@ export function getNeedsReviewReports() {
 
 export function getVerificationConfig() {
   return request("/verification/config");
+}
+
+export function getSecurityConfig() {
+  return request("/security/config");
 }
 
 export function geocodeLocation(query, options = {}) {

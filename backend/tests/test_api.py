@@ -5,13 +5,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import database
-from app.main import app
+from app.main import RATE_LIMITS, app
 
 
 @pytest.fixture()
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("RESCUEMESH_DB_PATH", str(db_path))
+    monkeypatch.setenv("RESCUEMESH_DISABLE_RATE_LIMITING", "true")
+    monkeypatch.delenv("RESCUEMESH_PUBLIC_MODE", raising=False)
+    monkeypatch.delenv("RESCUEMESH_ADMIN_TOKEN", raising=False)
+    monkeypatch.delenv("RESCUEMESH_RESPONDER_TOKEN", raising=False)
+    RATE_LIMITS.clear()
     database.init_db()
     return TestClient(app)
 
@@ -252,6 +257,54 @@ def test_public_mode_requires_admin_token_for_delete(client: TestClient, monkeyp
     assert blocked.status_code == 403
     assert allowed.status_code == 200
     assert allowed.json()["deleted_count"] == 1
+
+
+def test_public_mode_requires_responder_token_for_responder_actions(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RESCUEMESH_PUBLIC_MODE", "true")
+    monkeypatch.setenv("RESCUEMESH_RESPONDER_TOKEN", "responder-secret")
+    client.post("/reports", json=sample_report())
+
+    blocked = client.post("/reports/local-report-1/responder-verify")
+    allowed = client.post("/reports/local-report-1/responder-verify", headers={"X-Responder-Token": "responder-secret"})
+
+    assert blocked.status_code == 403
+    assert allowed.status_code == 200
+    assert allowed.json()["responder_verified"] is True
+
+
+def test_security_headers_are_set(client: TestClient) -> None:
+    response = client.get("/health")
+
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+
+
+def test_rate_limiting_can_block_request_bursts(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RESCUEMESH_DISABLE_RATE_LIMITING", raising=False)
+    RATE_LIMITS.clear()
+
+    responses = [client.post("/reports", json=sample_report(f"rate-limit-{index}")) for index in range(31)]
+
+    assert responses[-1].status_code == 429
+
+
+def test_comment_image_rejects_svg_data_url(client: TestClient) -> None:
+    client.post("/reports", json=sample_report())
+
+    response = client.post(
+        "/reports/local-report-1/comments",
+        json={
+            "comment_id": "comment-svg-1",
+            "report_id": "local-report-1",
+            "body": "",
+            "image_data_url": "data:image/svg+xml;base64,PHN2Zy8+",
+            "device_id": "device-beta",
+            "timestamp": "2026-05-01T12:05:00Z",
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_inside_emergency_zone_increases_confidence(client: TestClient) -> None:

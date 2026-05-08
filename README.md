@@ -82,6 +82,7 @@ Backend routes:
 - `POST /reports/{id}/responder-note`
 - `GET /reports/needs-review`
 - `GET /verification/config`
+- `GET /security/config`
 - `GET /live-incidents`
 - `GET /live-incidents/status`
 - `POST /live-incidents/refresh`
@@ -149,7 +150,20 @@ The repo includes a root `Dockerfile` and `render.yaml` for a one-service Render
 3. Use the included `render.yaml`.
 4. After deploy, open the generated `https://...onrender.com` URL.
 
-The public deployment sets `RESCUEMESH_PUBLIC_MODE=true`, which requires an admin token for destructive endpoints like `DELETE /reports`. Public visitors can add, view, confirm, and resolve reports, but they cannot clear all reports from the browser UI.
+The public deployment sets `RESCUEMESH_PUBLIC_MODE=true`, which requires an admin token for destructive endpoints like `DELETE /reports` and a responder token for responder review actions. Public visitors can add, view, confirm, and resolve reports, but they cannot clear all reports or mark reports responder-verified unless they have the configured token.
+
+Recommended public environment variables:
+
+```text
+RESCUEMESH_PUBLIC_MODE=true
+RESCUEMESH_ADMIN_TOKEN=choose-a-long-random-admin-token
+RESCUEMESH_RESPONDER_TOKEN=choose-a-long-random-responder-token
+RESCUEMESH_CORS_ORIGINS=https://your-rescuemesh-site.example
+RESCUEMESH_REQUIRE_HTTPS=true
+RESCUEMESH_DISABLE_RATE_LIMITING=false
+```
+
+In the app, open **Node Status** and save the admin/responder token in the Security Tokens panel for the browser you are using. Tokens are stored only in that browser and sent as request headers.
 
 The default Render plan in `render.yaml` is free. Free services use ephemeral filesystem storage, so SQLite report data can disappear after restarts or deploys. For persistent public data, switch to a paid Render service, attach a persistent disk, and set:
 
@@ -221,6 +235,33 @@ Status rules:
 - the same device cannot confirm the same report twice
 
 The UI shows confidence, verification label, aging label, evidence, warnings, source trust label, Gemini incident guidance, responder actions, and filters for verification state, confidence, age, suspicious reports, stale reports, and responder-verified reports.
+
+## Security Hardening
+
+RescueMesh now includes MVP security controls intended for demos and small public prototypes:
+
+- parameterized SQLite queries to reduce SQL injection risk
+- Pydantic validation for report fields, coordinates, comments, images, and bounded sync payloads
+- admin token protection for destructive routes
+- responder token protection for responder verify/reject/note routes
+- simple in-memory rate limiting for report creation, sync, confirmations, comments, geocoding, AI guidance, deletes, responder actions, and WebSocket connection bursts
+- restricted CORS defaults for localhost/LAN testing, with `RESCUEMESH_CORS_ORIGINS` for production domains
+- security headers including `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, and a Content Security Policy
+- optional HTTPS/WSS enforcement with `RESCUEMESH_REQUIRE_HTTPS=true`
+- server-side image data URL validation that allows PNG, JPEG, WebP, and GIF but rejects SVG data URLs
+- frontend image compression before pasted comment images are stored, which strips most metadata in the browser canvas step
+- Gemini API keys remain backend-only environment variables and are not shipped to the frontend
+
+Important remaining production work:
+
+- replace shared tokens with real user accounts or single sign-on for responder/admin roles
+- use persistent production storage and backups
+- add durable/distributed rate limiting if running multiple backend instances
+- add a real image upload service with malware scanning, metadata stripping, and retention policies
+- add end-to-end encryption or field-level encryption for sensitive deployments
+- add cryptographic report signatures with anonymous public keys for stronger device identity
+
+The app intentionally avoids real names and personal profiles. Anonymous device IDs are stored locally, and report location is attached only to the report being created rather than continuously tracking the user.
 
 ## AI Incident Guidance
 

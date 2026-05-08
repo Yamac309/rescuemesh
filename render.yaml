@@ -11,3 +11,9 @@ services:
         value: RescueMesh Public Node
       - key: RESCUEMESH_ADMIN_TOKEN
         sync: false
+      - key: RESCUEMESH_RESPONDER_TOKEN
+        sync: false
+      - key: RESCUEMESH_REQUIRE_HTTPS
+        value: "true"
+      - key: RESCUEMESH_DISABLE_RATE_LIMITING
+        value: "false"

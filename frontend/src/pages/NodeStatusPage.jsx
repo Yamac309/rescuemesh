@@ -1,5 +1,6 @@
 import { RefreshCw } from "lucide-react";
 import NodeStatusCard from "../components/NodeStatusCard";
+import SecurityAccessPanel from "../components/SecurityAccessPanel";
 
 export default function NodeStatusPage({ mesh }) {
   return (
@@ -14,6 +15,7 @@ export default function NodeStatusPage({ mesh }) {
         </button>
       </section>
       <NodeStatusCard {...mesh} />
+      <SecurityAccessPanel />
       <section className="info-panel">
         <h2>Online Response Node</h2>
         <p>

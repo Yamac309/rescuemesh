@@ -1,3 +1,6 @@
+import base64
+import binascii
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -17,10 +20,12 @@ Category = Literal[
 
 Urgency = Literal["Low", "Medium", "High", "Critical"]
 Status = Literal["Unverified", "Confirmed", "Resolved", "Needs Review"]
+SAFE_IMAGE_DATA_URL = re.compile(r"^data:image/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=\s]+)$")
+MAX_COMMENT_IMAGE_BYTES = 4_500_000
 
 
 class ReportBase(BaseModel):
-    report_id: str = Field(min_length=8)
+    report_id: str = Field(min_length=8, max_length=160)
     title: str = Field(min_length=1, max_length=120)
     category: Category
     description: str = Field(default="", max_length=2000)
@@ -31,7 +36,7 @@ class ReportBase(BaseModel):
     longitude: float = Field(ge=-180, le=180)
     status: Status = "Unverified"
     timestamp: str
-    device_id: str = Field(min_length=4)
+    device_id: str = Field(min_length=4, max_length=160)
     photo_evidence_attached: bool = False
     is_demo: bool = False
 
@@ -57,8 +62,8 @@ class Report(ReportBase):
 
 
 class SyncRequest(BaseModel):
-    known_report_ids: list[str] = Field(default_factory=list)
-    reports: list[ReportCreate] = Field(default_factory=list)
+    known_report_ids: list[str] = Field(default_factory=list, max_length=5000)
+    reports: list[ReportCreate] = Field(default_factory=list, max_length=200)
 
 
 class SyncResponse(BaseModel):
@@ -71,23 +76,32 @@ class SyncResponse(BaseModel):
 
 
 class ConfirmRequest(BaseModel):
-    device_id: str = Field(min_length=4)
+    device_id: str = Field(min_length=4, max_length=160)
 
 
 class CommentBase(BaseModel):
-    comment_id: str = Field(min_length=8)
-    report_id: str = Field(min_length=8)
+    comment_id: str = Field(min_length=8, max_length=180)
+    report_id: str = Field(min_length=8, max_length=160)
     body: str = Field(default="", max_length=1000)
-    image_data_url: str = Field(default="", max_length=2_500_000)
-    device_id: str = Field(min_length=4)
+    image_data_url: str = Field(default="", max_length=6_000_000)
+    device_id: str = Field(min_length=4, max_length=160)
     timestamp: str
 
     @model_validator(mode="after")
     def require_text_or_image(self):
         if not self.body.strip() and not self.image_data_url:
             raise ValueError("Comment must include text or an image")
-        if self.image_data_url and not self.image_data_url.startswith("data:image/"):
-            raise ValueError("Comment image must be a data URL")
+        if self.image_data_url:
+            match = SAFE_IMAGE_DATA_URL.match(self.image_data_url)
+            if not match:
+                raise ValueError("Comment image must be a PNG, JPEG, WebP, or GIF data URL")
+            try:
+                encoded_image = re.sub(r"\s+", "", match.group(2))
+                decoded_size = len(base64.b64decode(encoded_image, validate=True))
+            except (binascii.Error, ValueError):
+                raise ValueError("Comment image data URL is not valid base64") from None
+            if decoded_size > MAX_COMMENT_IMAGE_BYTES:
+                raise ValueError("Comment image is too large")
         return self
 
 
@@ -104,7 +118,7 @@ class ResponderNoteRequest(BaseModel):
 
 
 class DeleteDemoReportsRequest(BaseModel):
-    report_ids: list[str] = Field(default_factory=list)
+    report_ids: list[str] = Field(default_factory=list, max_length=1000)
 
 
 class IncidentGuidanceRequest(BaseModel):
